@@ -1,0 +1,13 @@
+{
+  "name": "landmarks-uploader",
+  "version": "1.0.0",
+  "description": "Upload landmarks CSV to Firestore",
+  "main": "upload-landmarks.js",
+  "scripts": {
+    "upload": "node upload-landmarks.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "papaparse": "^5.5.3"
+  }
+}

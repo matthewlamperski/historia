@@ -1,4 +1,10 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Historia - React Native App
+
+A modern, well-structured React Native application built with the latest tools and best practices.
+
+## 🚀 Tech Stack & Packages
+
+This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli), enhanced with modern development tools and best practices.
 
 # Getting Started
 
