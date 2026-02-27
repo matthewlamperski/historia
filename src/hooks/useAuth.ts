@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { useSubscriptionStore } from '../store/subscriptionStore';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 
 export interface UseAuthReturn {
@@ -47,6 +48,8 @@ export const useAuth = (): UseAuthReturn => {
     fetchUserProfile,
   } = useAuthStore();
 
+  const { initialize: initSubscription, teardown: teardownSubscription } = useSubscriptionStore();
+
   // Handle auth state changes
   const handleAuthStateChanged = useCallback(
     async (firebaseUser: FirebaseAuthTypes.User | null) => {
@@ -65,8 +68,12 @@ export const useAuth = (): UseAuthReturn => {
         // Fetch user profile from Firestore
         const userProfile = await fetchUserProfile(firebaseUser.uid);
         setUser(userProfile);
+
+        // Initialize subscription store for this user
+        initSubscription(firebaseUser.uid);
       } else {
-        // User is signed out
+        // User is signed out — tear down IAP listeners
+        teardownSubscription();
         setUser(null);
         setAuthUser(null);
       }
@@ -74,7 +81,7 @@ export const useAuth = (): UseAuthReturn => {
       setInitialized(true);
       setLoading(false);
     },
-    [fetchUserProfile, setUser, setAuthUser, setInitialized, setLoading]
+    [fetchUserProfile, setUser, setAuthUser, setInitialized, setLoading, initSubscription, teardownSubscription]
   );
 
   // Set up auth state listener on mount

@@ -10,6 +10,7 @@ export type RootStackParamList = {
   ChatScreen: { conversationId: string; otherUserId?: string };
   Settings: undefined;
   BlockedUsers: undefined;
+  Subscription: undefined;
   // Add more screens as needed
 };
 
@@ -81,6 +82,34 @@ export class ApiError extends Error {
   }
 }
 
+// Subscription types
+export type SubscriptionTier = 'free' | 'premium';
+export type SubscriptionStatus = 'free' | 'trial' | 'active' | 'expired' | 'cancelled';
+
+export type PremiumFeature =
+  | 'OFFLINE_MAPS'
+  | 'BONUS_POINTS'
+  | 'GRATITUDE_REFLECTIONS'
+  | 'UNLIMITED_BOOKMARKS'
+  | 'ACHIEVEMENT_BADGES'
+  | 'POINT_REDEMPTIONS';
+
+export interface SubscriptionRecord {
+  userId: string;
+  tier: SubscriptionTier;
+  status: SubscriptionStatus;
+  isOnTrial: boolean;
+  trialStartDate: string | null;
+  trialEndDate: string | null;
+  subscriptionStartDate: string | null;
+  subscriptionEndDate: string | null;
+  productId: string | null;
+  transactionId: string | null;
+  platform: 'ios' | 'android' | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // User types (example)
 export interface User {
   id: string;
@@ -98,6 +127,10 @@ export interface User {
   companions: string[]; // array of user IDs who are companions
   visitedLandmarks: string[]; // array of landmark IDs visited
   bookmarkedLandmarks: string[]; // array of landmark IDs bookmarked
+  // Subscription fields (optional for backwards compatibility with existing data)
+  isPremium?: boolean;
+  pointsBalance?: number;
+  subscriptionStatus?: SubscriptionStatus;
   createdAt: string;
   updatedAt: string;
 }

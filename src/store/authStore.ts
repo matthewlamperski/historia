@@ -383,6 +383,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       companions: [],
       visitedLandmarks: [],
       bookmarkedLandmarks: [],
+      isPremium: false as boolean,
+      pointsBalance: 0,
+      subscriptionStatus: 'free' as const,
       createdAt: now,
       updatedAt: now,
     };

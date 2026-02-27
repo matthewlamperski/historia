@@ -6,6 +6,7 @@ export { landmarksService } from './landmarksService';
 export { visitsService } from './visitsService';
 export { companionsService } from './companionsService';
 export { moderationService } from './moderationService';
+export { subscriptionService } from './subscriptionService';
 export { firestore, storage, auth, COLLECTIONS } from './firebaseConfig';
 
 // Add more services as they are created

@@ -17,6 +17,7 @@ import { PostDetailScreen } from '../screens/PostDetailScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { BlockedUsersScreen } from '../screens/BlockedUsersScreen';
 import { BanScreen } from '../screens/BanScreen';
+import { SubscriptionScreen } from '../screens/SubscriptionScreen';
 import { AuthNavigator } from './AuthNavigator';
 import { useModeration } from '../hooks';
 
@@ -136,6 +137,11 @@ const MainStackNavigator = () => {
         name="BlockedUsers"
         component={BlockedUsersScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Subscription"
+        component={SubscriptionScreen}
+        options={{ presentation: 'modal', headerShown: false }}
       />
     </Stack.Navigator>
   );

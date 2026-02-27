@@ -11,6 +11,7 @@ export { MessageBubble } from './MessageBubble';
 export { MessageInput } from './MessageInput';
 export { ActionSheet } from './ActionSheet';
 export { ReportModal } from './ReportModal';
+export { PremiumGate } from './PremiumGate';
 
 // Add more UI components as they are created
 export type { ButtonVariant, ButtonSize } from '../../types';

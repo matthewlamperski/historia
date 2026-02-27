@@ -7,7 +7,7 @@ import LocationSwitcherHeader from '../components/ui/LocationSwitcherHeader';
 import BottomSheet, { BottomSheetView, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
-import { useLandmarks, useVisits } from '../hooks';
+import { useLandmarks, useVisits, useSubscription } from '../hooks';
 import Geolocation from 'react-native-geolocation-service';
 
 // Cincinnati coordinates
@@ -135,6 +135,10 @@ const MapTab = () => {
   const userId = 'mock-user-id'; // In real app, get from auth
   const { bookmarkLandmark, unbookmarkLandmark } = useLandmarks(userId, false);
   const { createVisit, hasVisited: checkVisited, verifyLocation } = useVisits(userId, false);
+  const { isPremium, requirePremium } = useSubscription();
+
+  // Free users are limited to 10 bookmarks
+  const FREE_BOOKMARK_LIMIT = 10;
 
   // Bottom sheet snap points
   const snapPoints = useMemo(() => ['35%', '60%'], []);
@@ -187,22 +191,58 @@ const MapTab = () => {
     }
   };
 
-  // Handle bookmark toggle
+  // Handle bookmark toggle (free tier limited to FREE_BOOKMARK_LIMIT bookmarks)
   const handleBookmark = useCallback(async () => {
     if (!selectedLandmark) return;
 
-    try {
-      if (isBookmarked) {
+    if (isBookmarked) {
+      try {
         await unbookmarkLandmark(selectedLandmark.id);
         setIsBookmarked(false);
-      } else {
-        await bookmarkLandmark(selectedLandmark.id);
-        setIsBookmarked(true);
+      } catch (error) {
+        console.error('Error removing bookmark:', error);
       }
-    } catch (error) {
-      console.error('Error toggling bookmark:', error);
+      return;
     }
-  }, [selectedLandmark, isBookmarked, bookmarkLandmark, unbookmarkLandmark]);
+
+    // Adding a new bookmark — check free tier limit
+    // In production, currentBookmarkCount comes from user.bookmarkedLandmarks.length
+    // For now we use a mock check; real integration wires authStore user data
+    const currentBookmarkCount = 0; // TODO: replace with authStore user.bookmarkedLandmarks.length
+    const atFreeLimit = !isPremium && currentBookmarkCount >= FREE_BOOKMARK_LIMIT;
+
+    if (atFreeLimit) {
+      requirePremium('UNLIMITED_BOOKMARKS', () => {});
+      return;
+    }
+
+    try {
+      await bookmarkLandmark(selectedLandmark.id);
+      setIsBookmarked(true);
+    } catch (error) {
+      console.error('Error bookmarking landmark:', error);
+    }
+  }, [selectedLandmark, isBookmarked, bookmarkLandmark, unbookmarkLandmark, isPremium, requirePremium, FREE_BOOKMARK_LIMIT]);
+
+  // Handle offline map download (premium only)
+  const handleOfflineMapDownload = useCallback(() => {
+    requirePremium('OFFLINE_MAPS', () => {
+      Alert.alert(
+        'Download Offline Map',
+        'Download the current map area for offline use? This may use up to 50MB of storage.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Download',
+            onPress: () => {
+              // TODO: Implement offline map download
+              Alert.alert('Coming Soon', 'Offline map downloads are being set up. Check back soon!');
+            },
+          },
+        ]
+      );
+    });
+  }, [requirePremium]);
 
   // Handle visit check-in
   const handleVisit = useCallback(async () => {
@@ -293,6 +333,27 @@ const MapTab = () => {
             </Marker>
           ))}
         </MapView>
+
+        {/* Offline map download button (premium feature) */}
+        <TouchableOpacity
+          style={styles.offlineButton}
+          onPress={handleOfflineMapDownload}
+          activeOpacity={0.85}
+        >
+          <Icon
+            name={isPremium ? 'download' : 'lock'}
+            size={14}
+            color={theme.colors.primary[600]}
+          />
+          <Text style={styles.offlineButtonText}>
+            {isPremium ? 'Save Offline' : 'Offline Maps'}
+          </Text>
+          {!isPremium && (
+            <View style={styles.premiumBadge}>
+              <Icon name="crown" size={8} color={theme.colors.white} solid />
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       <BottomSheet
@@ -414,9 +475,38 @@ const styles = StyleSheet.create({
   },
   mapContainer: {
     flex: 1,
+    position: 'relative',
   },
   map: {
     flex: 1,
+  },
+  offlineButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.white,
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
+    ...theme.shadows.md,
+  },
+  offlineButtonText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.primary[700],
+  },
+  premiumBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary[500],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   markerContainer: {
     width: 20,

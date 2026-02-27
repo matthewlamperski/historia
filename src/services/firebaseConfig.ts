@@ -26,4 +26,6 @@ export const COLLECTIONS = {
   BLOCKS: 'blocks',
   USER_BANS: 'userBans',
   MODERATION_ACTIONS: 'moderationActions',
+  // Subscription
+  SUBSCRIPTIONS: 'subscriptions',
 } as const;

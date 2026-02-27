@@ -17,7 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { RootStackScreenProps, User, Post as PostType } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useImagePicker } from '../hooks/useImagePicker';
-import { useVisits } from '../hooks';
+import { useVisits, useSubscription } from '../hooks';
 
 // Mock current user data
 const CURRENT_USER: User = {
@@ -36,6 +36,9 @@ const CURRENT_USER: User = {
   companions: ['mock-user-1', 'mock-user-2'],
   visitedLandmarks: ['1', '2', '3'],
   bookmarkedLandmarks: ['4', '5'],
+  isPremium: false,
+  pointsBalance: 0,
+  subscriptionStatus: 'free',
   createdAt: '2024-01-15T10:30:00Z',
   updatedAt: '2025-01-12T14:22:00Z'
 };
@@ -99,6 +102,7 @@ const ProfileTab = () => {
 
   const currentUserId = 'current-user-123';
   const { visits } = useVisits(currentUserId, true);
+  const { isPremium, isOnTrial, showSubscriptionScreen } = useSubscription();
 
   const handleEditProfile = () => {
     console.log('Edit profile pressed');
@@ -251,6 +255,57 @@ const ProfileTab = () => {
           Settings
         </Button>
       </View>
+
+      {/* Points & Rewards Section */}
+      {isPremium ? (
+        <View style={styles.pointsCard}>
+          <View style={styles.pointsCardHeader}>
+            <Icon name="star" size={16} color={theme.colors.warning[500]} solid />
+            <Text variant="label" weight="semibold" style={styles.pointsCardTitle}>
+              Your Points
+            </Text>
+            {isOnTrial && (
+              <View style={styles.trialChip}>
+                <Text variant="caption" weight="medium" style={styles.trialChipText}>
+                  Trial
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text variant="h3" weight="bold" style={styles.pointsBalance}>
+            {(user.pointsBalance ?? 0).toLocaleString()} pts
+          </Text>
+          <Text variant="caption" color="gray.500">
+            Earn +10 pts per visit · +2 pts per post
+          </Text>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.premiumPromoCard}
+          onPress={showSubscriptionScreen}
+          activeOpacity={0.85}
+        >
+          <View style={styles.premiumPromoLeft}>
+            <View style={styles.premiumPromoIcon}>
+              <Icon name="crown" size={20} color={theme.colors.primary[500]} solid />
+            </View>
+            <View>
+              <Text variant="label" weight="semibold" style={styles.premiumPromoTitle}>
+                Unlock Points & Badges
+              </Text>
+              <Text variant="caption" color="gray.500" style={styles.premiumPromoSub}>
+                Earn rewards on every visit · Redeem for gear
+              </Text>
+            </View>
+          </View>
+          <View style={styles.premiumPromoCta}>
+            <Text variant="caption" weight="bold" style={styles.premiumPromoCtaText}>
+              Try Free
+            </Text>
+            <Icon name="chevron-right" size={10} color={theme.colors.primary[600]} solid />
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Visited Landmarks Section */}
       {visits.length > 0 && (
@@ -419,6 +474,87 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  // Points card (premium users)
+  pointsCard: {
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  pointsCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    marginBottom: theme.spacing.xs,
+  },
+  pointsCardTitle: {
+    color: theme.colors.primary[800],
+  },
+  trialChip: {
+    backgroundColor: theme.colors.success[100],
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 2,
+    marginLeft: 'auto',
+  },
+  trialChipText: {
+    color: theme.colors.success[700],
+    fontSize: theme.fontSize.xs,
+  },
+  pointsBalance: {
+    color: theme.colors.primary[700],
+    marginBottom: 2,
+  },
+  // Premium promo card (free users)
+  premiumPromoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.white,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary[200],
+    ...theme.shadows.sm,
+  },
+  premiumPromoLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    flex: 1,
+  },
+  premiumPromoIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  premiumPromoTitle: {
+    color: theme.colors.gray[800],
+    marginBottom: 2,
+  },
+  premiumPromoSub: {
+    lineHeight: 16,
+  },
+  premiumPromoCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary[500],
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    gap: 4,
+    marginLeft: theme.spacing.sm,
+  },
+  premiumPromoCtaText: {
+    color: theme.colors.white,
+    fontSize: theme.fontSize.xs,
   },
   visitsSection: {
     marginBottom: theme.spacing.xl,
