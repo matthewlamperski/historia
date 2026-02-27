@@ -1,28 +1,32 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { 
-  View, 
-  StyleSheet, 
+import {
+  View,
+  StyleSheet,
   FlatList,
   TouchableOpacity,
   Image,
   RefreshControl,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button, Post } from '../components/ui';
+import { Text, Button, Post, ActionSheet, ReportModal } from '../components/ui';
+import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { RootStackScreenProps, User, Post as PostType, RootStackParamList } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import { messagingService } from '../services';
+import { useToast, useModeration } from '../hooks';
 
 // Mock user data for different profiles
 const MOCK_USERS: User[] = [
   {
-    id: 'user-1',
-    name: 'Sarah Johnson',
-    username: 'sarahj_history',
-    email: 'sarah@example.com',
-    avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
+    id: 'other-user-1',
+    name: 'Alice Smith',
+    username: 'alice_s',
+    email: 'alice@example.com',
+    avatar: 'https://i.pravatar.cc/150?img=5',
     bio: '🏛️ Architecture historian | 📸 Capturing Cincinnati\'s hidden gems | Teaching history through storytelling',
     location: 'Cincinnati, OH',
     website: 'https://sarahhistory.blog',
@@ -106,6 +110,7 @@ const ProfileView = () => {
   const navigation = useNavigation<RootStackScreenProps<'ProfileView'>['navigation']>();
   const route = useRoute<ProfileViewRouteProp>();
   const { userId } = route.params;
+  console.log("User ID: ", userId);
 
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<PostType[]>([]);
@@ -113,12 +118,18 @@ const ProfileView = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowingLoading, setIsFollowingLoading] = useState(false);
+  const [showActionSheet, setShowActionSheet] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  const { blockUser, isUserBlocked } = useModeration();
 
   useEffect(() => {
     // Simulate API call to load user data
     const loadUserData = () => {
       const foundUser = MOCK_USERS.find(u => u.id === userId);
       const userPosts = MOCK_USER_POSTS[userId] || [];
+
+      console.log("Found User: ", foundUser);
       
       if (foundUser) {
         setUser(foundUser);
@@ -151,10 +162,28 @@ const ProfileView = () => {
     }, 500);
   }, [user]);
 
-  const handleMessage = useCallback(() => {
-    // Navigate to messages or open chat
-    console.log('Message user:', user?.username);
-  }, [user]);
+  const { showToast } = useToast();
+
+  const handleMessage = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      // Get or create conversation with this user
+      const conversation = await messagingService.getOrCreateConversation(
+        'mock-user-id', // Current user (TODO: Replace with actual user ID from auth store)
+        user.id // Other user
+      );
+
+      // Navigate to chat
+      navigation.navigate('ChatScreen', {
+        conversationId: conversation.id,
+        otherUserId: user.id,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to open conversation';
+      showToast(errorMessage, 'error');
+    }
+  }, [user, navigation, showToast]);
 
   const handleLike = useCallback((postId: string) => {
     setPosts(prev => prev.map(post => {
@@ -189,6 +218,51 @@ const ProfileView = () => {
     }, 1000);
   }, []);
 
+  const handleMorePress = () => {
+    setShowActionSheet(true);
+  };
+
+  const handleBlockUser = useCallback(async () => {
+    if (!user) return;
+
+    Alert.alert(
+      'Block User',
+      `Are you sure you want to block ${user.name}? They won't be able to see your posts or send you messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(user.id);
+              showToast(`${user.name} has been blocked`, 'success');
+              navigation.goBack();
+            } catch (error) {
+              showToast('Failed to block user', 'error');
+            }
+          },
+        },
+      ]
+    );
+  }, [user, blockUser, showToast, navigation]);
+
+  const getActionSheetOptions = (): ActionSheetOption[] => {
+    return [
+      {
+        label: 'Report User',
+        icon: 'flag',
+        onPress: () => setShowReportModal(true),
+      },
+      {
+        label: 'Block User',
+        icon: 'user-slash',
+        onPress: handleBlockUser,
+        destructive: true,
+      },
+    ];
+  };
+
   const renderPost = useCallback(({ item }: { item: PostType }) => (
     <TouchableOpacity 
       activeOpacity={0.95}
@@ -219,7 +293,7 @@ const ProfileView = () => {
           <Text variant="h3" weight="semibold" style={styles.headerTitle}>
             @{user.username}
           </Text>
-          <TouchableOpacity style={styles.moreButton}>
+          <TouchableOpacity style={styles.moreButton} onPress={handleMorePress}>
             <Icon name="ellipsis" size={20} color={theme.colors.gray[700]} />
           </TouchableOpacity>
         </View>
@@ -279,34 +353,6 @@ const ProfileView = () => {
           </View>
         )}
 
-        {/* Profile Stats */}
-        <View style={styles.statsContainer}>
-          <TouchableOpacity style={styles.statItem}>
-            <Text variant="h3" color="primary.500">
-              {user.postCount}
-            </Text>
-            <Text variant="caption" color="gray.600">
-              Posts
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.statItem}>
-            <Text variant="h3" color="primary.500">
-              {user.followerCount.toLocaleString()}
-            </Text>
-            <Text variant="caption" color="gray.600">
-              Followers
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.statItem}>
-            <Text variant="h3" color="primary.500">
-              {user.followingCount}
-            </Text>
-            <Text variant="caption" color="gray.600">
-              Following
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Action Buttons */}
         <View style={styles.actions}>
           <Button
@@ -318,7 +364,7 @@ const ProfileView = () => {
             {isFollowingLoading ? (
               <ActivityIndicator size="small" color={isFollowing ? theme.colors.primary[500] : theme.colors.white} />
             ) : (
-              isFollowing ? "Following" : "Follow"
+              isFollowing ? "Following" : "Add Companion"
             )}
           </Button>
           <Button
@@ -395,6 +441,27 @@ const ProfileView = () => {
         }
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Action Sheet */}
+      <ActionSheet
+        visible={showActionSheet}
+        onClose={() => setShowActionSheet(false)}
+        options={getActionSheetOptions()}
+      />
+
+      {/* Report Modal */}
+      {user && (
+        <ReportModal
+          visible={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          reportedId={user.id}
+          reportedType="user"
+          reportedUserId={user.id}
+          contentSnapshot={{
+            userName: user.name,
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 };

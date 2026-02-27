@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Switch } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button } from '../components/ui';
 import { theme } from '../constants/theme';
 import { useNavigation } from '@react-navigation/native';
+import { RootStackScreenProps } from '../types';
+import { useAuth } from '../hooks';
+import Icon from 'react-native-vector-icons/FontAwesome6';
 
 const SettingItem: React.FC<{
   title: string;
@@ -38,8 +48,45 @@ const SettingItem: React.FC<{
   </View>
 );
 
+const NavigationItem: React.FC<{
+  title: string;
+  description?: string;
+  onPress: () => void;
+  icon?: string;
+}> = ({ title, description, onPress, icon }) => (
+  <TouchableOpacity style={styles.navigationItem} onPress={onPress}>
+    <View style={styles.navigationItemLeft}>
+      {icon && (
+        <Icon
+          name={icon}
+          size={20}
+          color={theme.colors.gray[600]}
+          style={styles.navigationIcon}
+        />
+      )}
+      <View style={styles.settingContent}>
+        <Text variant="body" weight="medium">
+          {title}
+        </Text>
+        {description && (
+          <Text
+            variant="caption"
+            color="gray.600"
+            style={styles.settingDescription}
+          >
+            {description}
+          </Text>
+        )}
+      </View>
+    </View>
+    <Icon name="chevron-right" size={16} color={theme.colors.gray[400]} />
+  </TouchableOpacity>
+);
+
 export default function SettingsScreen() {
-  const navigation = useNavigation();
+  const navigation =
+    useNavigation<RootStackScreenProps<'Settings'>['navigation']>();
+  const { signOut } = useAuth();
   const [notifications, setNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [analytics, setAnalytics] = useState(true);
@@ -47,6 +94,23 @@ export default function SettingsScreen() {
   const handleSave = () => {
     console.log('Settings saved:', { notifications, darkMode, analytics });
     navigation.goBack();
+  };
+
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await signOut();
+          } catch (error) {
+            console.error('Error signing out:', error);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -78,16 +142,22 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* Privacy Section */}
+        {/* Privacy & Safety Section */}
         <View style={styles.section}>
           <Text variant="h4" style={styles.sectionTitle}>
-            Privacy
+            Privacy & Safety
           </Text>
           <SettingItem
             title="Analytics"
             description="Help improve the app by sharing usage data"
             value={analytics}
             onValueChange={setAnalytics}
+          />
+          <NavigationItem
+            title="Blocked Users"
+            description="Manage users you've blocked"
+            icon="user-slash"
+            onPress={() => navigation.navigate('BlockedUsers')}
           />
         </View>
 
@@ -124,8 +194,16 @@ export default function SettingsScreen() {
             variant="outline"
             fullWidth
             onPress={() => navigation.goBack()}
+            style={styles.actionButton}
           >
             Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            fullWidth
+            onPress={handleSignOut}
+          >
+            Sign Out
           </Button>
         </View>
       </ScrollView>
@@ -163,6 +241,23 @@ const styles = StyleSheet.create({
   },
   settingDescription: {
     marginTop: theme.spacing.xs,
+  },
+  navigationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray[200],
+  },
+  navigationItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  navigationIcon: {
+    marginRight: theme.spacing.md,
+    width: 24,
   },
   aboutItem: {
     flexDirection: 'row',

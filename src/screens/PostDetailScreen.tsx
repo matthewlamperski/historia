@@ -96,24 +96,28 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
       style={styles.footer}
     >
       <View style={styles.commentInput}>
-        <Input
-          placeholder="Write a comment..."
-          value={newComment}
-          onChangeText={setNewComment}
-          multiline
-          maxLength={500}
-          style={styles.textInput}
-        />
-        <Button
-          variant="primary"
-          size="sm"
-          onPress={handleSubmitComment}
-          disabled={!newComment.trim() || submitting}
-          loading={submitting}
-          style={styles.submitButton}
-        >
-          Post
-        </Button>
+        <View style={{ flex: 1, justifyContent: 'center', marginRight: theme.spacing.md }}>
+          <Input
+            placeholder="Write a comment..."
+            value={newComment}
+            onChangeText={setNewComment}
+            multiline
+            maxLength={500}
+            style={styles.textInput}
+          />
+        </View>
+        <View>
+          <Button
+            variant="primary"
+            size="sm"
+            onPress={handleSubmitComment}
+            disabled={!newComment.trim() || submitting}
+            loading={submitting}
+            style={styles.submitButton}
+          >
+            Post
+          </Button>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -124,7 +128,7 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
       
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Post Detail */}
-        <View style={styles.postContainer}>
+        <View>
           <Post 
             post={post} 
             onLike={() => {}} 
@@ -190,10 +194,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  postContainer: {
-    borderBottomWidth: 8,
-    borderBottomColor: theme.colors.gray[100],
-  },
   commentsSection: {
     flex: 1,
   },
@@ -241,17 +241,11 @@ const styles = StyleSheet.create({
   },
   commentInput: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.md,
     backgroundColor: theme.colors.white,
   },
   textInput: {
-    flex: 1,
-    marginRight: theme.spacing.md,
-    maxHeight: 100,
-    minHeight: 40,
   },
   submitButton: {
     minWidth: 60,

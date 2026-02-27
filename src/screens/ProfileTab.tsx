@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { RootStackScreenProps, User, Post as PostType } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useImagePicker } from '../hooks/useImagePicker';
+import { useVisits } from '../hooks';
 
 // Mock current user data
 const CURRENT_USER: User = {
@@ -32,6 +33,9 @@ const CURRENT_USER: User = {
   followingCount: 432,
   postCount: 89,
   isVerified: false,
+  companions: ['mock-user-1', 'mock-user-2'],
+  visitedLandmarks: ['1', '2', '3'],
+  bookmarkedLandmarks: ['4', '5'],
   createdAt: '2024-01-15T10:30:00Z',
   updatedAt: '2025-01-12T14:22:00Z'
 };
@@ -44,7 +48,7 @@ const USER_POSTS: PostType[] = [
     user: CURRENT_USER,
     content: 'Just visited the Cincinnati Museum Center! The Art Deco architecture is absolutely breathtaking. Fun fact: it served as a prototype for many other train stations built in the 1930s. 🚂✨',
     images: ['https://images.unsplash.com/photo-1580407196238-dac33f57c410?w=500'],
-    likes: ['user-1', 'user-2', 'user-3'],
+    landmarkId: '1',
     commentCount: 12,
     location: {
       latitude: 39.1097,
@@ -60,7 +64,7 @@ const USER_POSTS: PostType[] = [
     user: CURRENT_USER,
     content: 'Walking across the Roebling Suspension Bridge today reminded me that this beauty was actually the prototype for the Brooklyn Bridge! John Augustus Roebling\'s engineering genius spans both Cincinnati and New York. 🌉',
     images: ['https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=500'],
-    likes: ['user-4', 'user-5'],
+    landmarkId: '2',
     commentCount: 8,
     location: {
       latitude: 39.0936,
@@ -76,7 +80,7 @@ const USER_POSTS: PostType[] = [
     user: CURRENT_USER,
     content: 'Found this hidden gem at Fountain Square today! The Tyler Davidson Fountain has been the heart of Cincinnati since 1871. It\'s amazing how this space has witnessed over 150 years of city life. 💫',
     images: ['https://images.unsplash.com/photo-1573160813959-df05c1b8b5c4?w=500'],
-    likes: ['user-1', 'user-6'],
+    landmarkId: '3',
     commentCount: 5,
     createdAt: new Date('2025-01-09T12:45:00Z'),
     updatedAt: new Date('2025-01-09T12:45:00Z')
@@ -87,11 +91,14 @@ const ProfileTab = () => {
   const navigation = useNavigation<RootStackScreenProps<'Main'>['navigation']>();
   const { selectedImages, pickImages, clearImages } = useImagePicker();
   const [user, setUser] = useState<User>(CURRENT_USER);
-  const [posts, setPosts] = useState<PostType[]>(USER_POSTS);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [posts, _setPosts] = useState<PostType[]>(USER_POSTS);
+  const [_loading, _setLoading] = useState(false);
+  const [_refreshing, _setRefreshing] = useState(false);
   const [isEditingBio, setIsEditingBio] = useState(false);
-  const [bioText, setBioText] = useState(user.bio || '');
+  const [bioText, _setBioText] = useState(user.bio || '');
+
+  const currentUserId = 'current-user-123';
+  const { visits } = useVisits(currentUserId, true);
 
   const handleEditProfile = () => {
     console.log('Edit profile pressed');
@@ -110,7 +117,7 @@ const ProfileTab = () => {
         setUser(prev => ({ ...prev, avatar: selectedImages[0] }));
         clearImages();
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to change profile picture');
     }
   }, [pickImages, selectedImages, clearImages]);
@@ -121,20 +128,6 @@ const ProfileTab = () => {
     // In a real app, save to server
   }, [bioText]);
 
-  const handleLike = useCallback((postId: string) => {
-    setPosts(prev => prev.map(post => {
-      if (post.id === postId) {
-        const isLiked = post.likes.includes('current-user-123');
-        return {
-          ...post,
-          likes: isLiked 
-            ? post.likes.filter(id => id !== 'current-user-123')
-            : [...post.likes, 'current-user-123']
-        };
-      }
-      return post;
-    }));
-  }, []);
 
   const handleComment = useCallback((postId: string) => {
     const post = posts.find(p => p.id === postId);
@@ -151,28 +144,19 @@ const ProfileTab = () => {
     navigation.navigate('ProfileView', { userId });
   }, [navigation]);
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  }, []);
-
   const renderPost = useCallback(({ item }: { item: PostType }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       activeOpacity={0.95}
       onPress={() => navigation.navigate('PostDetail', { post: item })}
     >
       <Post
         post={item}
-        onLike={handleLike}
         onComment={handleComment}
         onShare={handleShare}
         onUserPress={handleUserPress}
       />
     </TouchableOpacity>
-  ), [handleLike, handleComment, handleShare, handleUserPress, navigation]);
+  ), [handleComment, handleShare, handleUserPress, navigation]);
 
   const renderHeader = () => (
     <View style={styles.profileContent}>
@@ -267,6 +251,49 @@ const ProfileTab = () => {
           Settings
         </Button>
       </View>
+
+      {/* Visited Landmarks Section */}
+      {visits.length > 0 && (
+        <View style={styles.visitsSection}>
+          <Text variant="h4" weight="semibold" style={styles.visitsSectionTitle}>
+            Visited Landmarks ({visits.length})
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.visitsScrollContent}
+          >
+            {visits.map((visit) => (
+              <TouchableOpacity key={visit.id} style={styles.visitCard}>
+                {visit.landmark?.images[0] && (
+                  <Image
+                    source={{ uri: visit.landmark.images[0] }}
+                    style={styles.visitImage}
+                  />
+                )}
+                <View style={styles.visitInfo}>
+                  <Text variant="caption" weight="semibold" numberOfLines={2} style={styles.visitName}>
+                    {visit.landmark?.name}
+                  </Text>
+                  <View style={styles.visitCheck}>
+                    <Icon name="check-circle" size={12} color={theme.colors.success[500]} solid />
+                    <Text variant="caption" color="success.600" style={styles.visitCheckText}>
+                      Visited
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Posts Section Header */}
+      <View style={styles.postsHeader}>
+        <Text variant="h4" weight="semibold">
+          Posts ({posts.length})
+        </Text>
+      </View>
     </View>
   );
 
@@ -277,28 +304,10 @@ const ProfileTab = () => {
         renderItem={renderPost}
         keyExtractor={item => item.id}
         ListHeaderComponent={renderHeader}
-    </View>
-  );
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <FlatList
-        data={posts}
-        renderItem={renderPost}
-        keyExtractor={item => item.id}
-        ListHeaderComponent={renderHeader}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={theme.colors.primary[500]}
-          />
-        }
-        showsVerticalScrollIndicator={false}
       />
     </SafeAreaView>
   );
+
 }
 
 const styles = StyleSheet.create({
@@ -410,6 +419,44 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  visitsSection: {
+    marginBottom: theme.spacing.xl,
+  },
+  visitsSectionTitle: {
+    marginBottom: theme.spacing.md,
+  },
+  visitsScrollContent: {
+    gap: theme.spacing.sm,
+    paddingRight: theme.spacing.lg,
+  },
+  visitCard: {
+    width: 140,
+    backgroundColor: theme.colors.white,
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: theme.colors.gray[200],
+    ...theme.shadows.sm,
+  },
+  visitImage: {
+    width: '100%',
+    height: 100,
+  },
+  visitInfo: {
+    padding: theme.spacing.sm,
+  },
+  visitName: {
+    marginBottom: theme.spacing.xs,
+    lineHeight: 16,
+  },
+  visitCheck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  visitCheckText: {
+    fontSize: theme.fontSize.xs,
   },
   postsHeader: {
     flexDirection: 'row',

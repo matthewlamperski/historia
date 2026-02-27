@@ -63,5 +63,14 @@
 		<string>FontAwesome6_Regular.ttf</string>
 		<string>FontAwesome6_Solid.ttf</string>
 	</array>
+	<key>CFBundleURLTypes</key>                                                                                                                                                                 
+	<array>                                                                                                                                                                                     
+		<dict>                                                                                                                                                                                    
+			<key>CFBundleURLSchemes</key>                                                                                                                                                           
+			<array>                                                                                                                                                                                 
+				<string>com.googleusercontent.apps.135408828364-e39age8ot711653iqhhocbg36gg2qk0b</string>                                                                                                                   
+			</array>                                                                                                                                                                                
+		</dict>                                                                                                                                                                                   
+	</array>
 </dict>
 </plist>

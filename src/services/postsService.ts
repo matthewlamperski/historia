@@ -10,7 +10,8 @@ try {
 }
 
 import { COLLECTIONS } from './firebaseConfig';
-import { Post, Comment, CreatePostData, CreateCommentData, User } from '../types';
+import { Post, Comment, CreatePostData, CreateCommentData, User, Landmark } from '../types';
+import { landmarksService } from './landmarksService';
 
 // Random profile pictures for demo users
 const randomAvatars = [
@@ -33,6 +34,9 @@ const mockUsers: User[] = [
     followingCount: 189,
     postCount: 32,
     isVerified: false,
+    companions: ['mock-user-2', 'mock-user-3'],
+    visitedLandmarks: ['1', '2', '3'],
+    bookmarkedLandmarks: ['4', '5'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -46,6 +50,9 @@ const mockUsers: User[] = [
     followingCount: 234,
     postCount: 78,
     isVerified: true,
+    companions: ['mock-user-1'],
+    visitedLandmarks: ['1', '2', '4'],
+    bookmarkedLandmarks: ['3', '6'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -59,6 +66,9 @@ const mockUsers: User[] = [
     followingCount: 298,
     postCount: 15,
     isVerified: false,
+    companions: ['mock-user-1', 'mock-user-4'],
+    visitedLandmarks: ['2', '3', '5'],
+    bookmarkedLandmarks: ['1'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -72,6 +82,9 @@ const mockUsers: User[] = [
     followingCount: 456,
     postCount: 134,
     isVerified: true,
+    companions: ['mock-user-3'],
+    visitedLandmarks: ['1', '3', '4', '5', '6'],
+    bookmarkedLandmarks: ['2'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -84,7 +97,7 @@ const mockPosts: Post[] = [
     user: mockUsers[0],
     content: 'Welcome to Historia! Just discovered this amazing historical landmark downtown. The architecture is incredible! 🏛️',
     images: [],
-    likes: ['mock-user-2', 'mock-user-3'],
+    landmarkId: '1',
     commentCount: 3,
     createdAt: new Date(Date.now() - 1000 * 60 * 30), // 30 minutes ago
     updatedAt: new Date(Date.now() - 1000 * 60 * 30),
@@ -95,7 +108,7 @@ const mockPosts: Post[] = [
     user: mockUsers[1],
     content: 'Beautiful day for exploring history! Found this gem tucked away in the old quarter. The stories these walls could tell... 📸',
     images: [],
-    likes: ['mock-user-1'],
+    landmarkId: '2',
     commentCount: 1,
     location: {
       latitude: 37.7749,
@@ -111,7 +124,6 @@ const mockPosts: Post[] = [
     user: mockUsers[2],
     content: 'Just finished reading about the Civil War battle that took place here in 1863. Standing where history happened gives me chills. 🪖',
     images: [],
-    likes: ['mock-user-1', 'mock-user-4'],
     commentCount: 2,
     location: {
       latitude: 39.8283,
@@ -127,7 +139,7 @@ const mockPosts: Post[] = [
     user: mockUsers[3],
     content: 'The preservation work being done at this 18th-century mansion is incredible. History lives on through dedicated people! 🏡',
     images: [],
-    likes: ['mock-user-2'],
+    landmarkId: '5',
     commentCount: 0,
     location: {
       latitude: 40.7589,
@@ -143,7 +155,6 @@ const mockPosts: Post[] = [
     user: mockUsers[0],
     content: 'Weekend trip to explore Native American heritage sites. Learning so much about the rich history of this land. 🪶',
     images: [],
-    likes: ['mock-user-2', 'mock-user-3', 'mock-user-4'],
     commentCount: 5,
     location: {
       latitude: 36.0544,
@@ -316,23 +327,30 @@ class PostsService {
       }
 
       const snapshot = await query.get();
-      
+
       const posts = await Promise.all(
-        snapshot.docs.map(async (doc) => {
+        snapshot.docs.map(async (doc: any) => {
           const data = doc.data();
-          
+
           // Get user data
           const userDoc = await firestore()
             .collection(COLLECTIONS.USERS)
             .doc(data.userId)
             .get();
-          
+
           const user = userDoc.data() as User;
+
+          // Get landmark data if present
+          let landmark: Landmark | undefined;
+          if (data.landmarkId) {
+            landmark = await landmarksService.getLandmark(data.landmarkId) || undefined;
+          }
 
           return {
             id: doc.id,
             ...data,
             user,
+            landmark,
             createdAt: data.createdAt.toDate(),
             updatedAt: data.updatedAt.toDate(),
           } as Post;
@@ -366,7 +384,7 @@ class PostsService {
         .get();
 
       const posts = await Promise.all(
-        snapshot.docs.map(async (doc) => {
+        snapshot.docs.map(async (doc: any) => {
           const data = doc.data();
           
           // Calculate distance (simple approximation)
@@ -409,36 +427,47 @@ class PostsService {
 
   // Create a new post
   async createPost(postData: CreatePostData, userId: string): Promise<Post> {
+    // Validate photo limit (max 10 photos)
+    if (postData.images && postData.images.length > 10) {
+      throw new Error('Maximum 10 photos allowed per post');
+    }
+
     if (!this.isFirebaseAvailable()) {
       // Mock implementation
       await new Promise<void>(resolve => setTimeout(resolve, 1000)); // Simulate upload delay
       const user = mockUsers.find(u => u.id === userId) || mockUsers[0];
-      
+
+      let landmark: Landmark | undefined;
+      if (postData.landmarkId) {
+        landmark = await landmarksService.getLandmark(postData.landmarkId) || undefined;
+      }
+
       const newPost: Post = {
         id: Date.now().toString(),
         userId,
         user: user,
         content: postData.content,
         images: postData.images || [],
-        likes: [],
+        landmarkId: postData.landmarkId,
+        landmark,
         commentCount: 0,
         location: postData.location,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      
+
       mockPostsData.unshift(newPost);
       return newPost;
     }
 
     try {
       const now = firestore.Timestamp.now();
-      
+
       const newPost = {
         userId,
         content: postData.content,
         images: postData.images || [],
-        likes: [],
+        landmarkId: postData.landmarkId || null,
         commentCount: 0,
         location: postData.location || null,
         createdAt: now,
@@ -454,13 +483,20 @@ class PostsService {
         .collection(COLLECTIONS.USERS)
         .doc(userId)
         .get();
-      
+
       const user = userDoc.data() as User;
+
+      // Get landmark data if present
+      let landmark: Landmark | undefined;
+      if (postData.landmarkId) {
+        landmark = await landmarksService.getLandmark(postData.landmarkId) || undefined;
+      }
 
       return {
         id: docRef.id,
         ...newPost,
         user,
+        landmark,
         createdAt: now.toDate(),
         updatedAt: now.toDate(),
       } as Post;
@@ -470,56 +506,72 @@ class PostsService {
     }
   }
 
-  // Like/unlike a post
-  async toggleLike(postId: string, userId: string): Promise<boolean> {
+  // Get posts from companions (for companion filter)
+  async getCompanionPosts(
+    companionIds: string[],
+    limit: number = 20,
+    lastPostId?: string
+  ): Promise<Post[]> {
     if (!this.isFirebaseAvailable()) {
-      // Mock implementation
-      const postIndex = mockPostsData.findIndex(p => p.id === postId);
-      if (postIndex !== -1) {
-        const post = mockPostsData[postIndex];
-        const isLiked = post.likes.includes(userId);
-        
-        if (isLiked) {
-          post.likes = post.likes.filter(id => id !== userId);
-        } else {
-          post.likes.push(userId);
-        }
-        
-        mockPostsData[postIndex] = post;
-      }
-      return true;
+      // Return mock data filtered by companion IDs
+      await new Promise<void>(resolve => setTimeout(resolve, 500));
+      const companionPosts = mockPostsData.filter(post =>
+        companionIds.includes(post.userId)
+      );
+      return companionPosts.slice(0, limit);
     }
 
     try {
-      const postRef = firestore().collection(COLLECTIONS.POSTS).doc(postId);
-      
-      await firestore().runTransaction(async (transaction) => {
-        const postDoc = await transaction.get(postRef);
-        
-        if (!postDoc.exists) {
-          throw new Error('Post does not exist');
-        }
+      if (companionIds.length === 0) return [];
 
-        const data = postDoc.data();
-        const likes = data?.likes || [];
-        const isLiked = likes.includes(userId);
+      let query = firestore()
+        .collection(COLLECTIONS.POSTS)
+        .where('userId', 'in', companionIds.slice(0, 10)) // Firestore 'in' query supports max 10 values
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
 
-        if (isLiked) {
-          // Remove like
-          transaction.update(postRef, {
-            likes: firestore.FieldValue.arrayRemove(userId),
-          });
-        } else {
-          // Add like
-          transaction.update(postRef, {
-            likes: firestore.FieldValue.arrayUnion(userId),
-          });
-        }
-      });
+      if (lastPostId) {
+        const lastDoc = await firestore()
+          .collection(COLLECTIONS.POSTS)
+          .doc(lastPostId)
+          .get();
+        query = query.startAfter(lastDoc);
+      }
 
-      return true;
+      const snapshot = await query.get();
+
+      const posts = await Promise.all(
+        snapshot.docs.map(async (doc: any) => {
+          const data = doc.data();
+
+          // Get user data
+          const userDoc = await firestore()
+            .collection(COLLECTIONS.USERS)
+            .doc(data.userId)
+            .get();
+
+          const user = userDoc.data() as User;
+
+          // Get landmark data if present
+          let landmark: Landmark | undefined;
+          if (data.landmarkId) {
+            landmark = await landmarksService.getLandmark(data.landmarkId) || undefined;
+          }
+
+          return {
+            id: doc.id,
+            ...data,
+            user,
+            landmark,
+            createdAt: data.createdAt.toDate(),
+            updatedAt: data.updatedAt.toDate(),
+          } as Post;
+        })
+      );
+
+      return posts;
     } catch (error) {
-      console.error('Error toggling like:', error);
+      console.error('Error fetching companion posts:', error);
       throw error;
     }
   }
@@ -547,7 +599,7 @@ class PostsService {
         .get();
 
       const comments = await Promise.all(
-        snapshot.docs.map(async (doc) => {
+        snapshot.docs.map(async (doc: any) => {
           const data = doc.data();
           
           // Get user data

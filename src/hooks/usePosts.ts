@@ -13,8 +13,8 @@ export interface UsePostsReturn {
   loadMorePosts: () => Promise<void>;
   refreshPosts: () => Promise<void>;
   createPost: (postData: CreatePostData) => Promise<void>;
-  toggleLike: (postId: string) => Promise<void>;
   loadPostsNearLocation: (latitude: number, longitude: number, radius?: number) => Promise<void>;
+  loadCompanionPosts: (companionIds: string[]) => Promise<void>;
 }
 
 export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
@@ -100,49 +100,21 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
     }
   }, [showToast]);
 
-  const toggleLike = useCallback(async (postId: string) => {
+  const loadCompanionPosts = useCallback(async (companionIds: string[]) => {
     try {
-      // Optimistic update
-      setPosts(prev => 
-        prev.map(post => {
-          if (post.id === postId) {
-            const userId = 'mock-user-id'; // In real app, get from auth
-            const isLiked = post.likes.includes(userId);
-            
-            return {
-              ...post,
-              likes: isLiked 
-                ? post.likes.filter(id => id !== userId)
-                : [...post.likes, userId]
-            };
-          }
-          return post;
-        })
-      );
+      setLoading(true);
+      setError(null);
 
-      await postsService.toggleLike(postId, 'mock-user-id');
+      const companionPosts = await postsService.getCompanionPosts(companionIds, 20);
+      setPosts(companionPosts);
+      setLastPostId(companionPosts[companionPosts.length - 1]?.id);
+      setHasMore(companionPosts.length === 20);
     } catch (err) {
-      // Revert optimistic update on error
-      const errorMessage = err instanceof Error ? err.message : 'Failed to update like';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load companion posts';
+      setError(errorMessage);
       showToast(errorMessage, 'error');
-      
-      // Revert the optimistic update
-      setPosts(prev => 
-        prev.map(post => {
-          if (post.id === postId) {
-            const userId = 'mock-user-id';
-            const isLiked = post.likes.includes(userId);
-            
-            return {
-              ...post,
-              likes: isLiked 
-                ? post.likes.filter(id => id !== userId)
-                : [...post.likes, userId]
-            };
-          }
-          return post;
-        })
-      );
+    } finally {
+      setLoading(false);
     }
   }, [showToast]);
 
@@ -190,7 +162,7 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
     loadMorePosts,
     refreshPosts,
     createPost,
-    toggleLike,
     loadPostsNearLocation,
+    loadCompanionPosts,
   };
 };

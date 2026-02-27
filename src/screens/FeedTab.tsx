@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button, Post, CreatePostModal } from '../components/ui';
 import { theme } from '../constants/theme';
-import { usePosts } from '../hooks';
+import { usePosts, useCompanions } from '../hooks';
 import { Post as PostType, CreatePostData } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useNavigation } from '@react-navigation/native';
@@ -22,6 +22,10 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 const FeedTab = () => {
   const navigation = useNavigation<NavigationProp>();
   const [showCreatePost, setShowCreatePost] = useState(false);
+  const [showCompanionsOnly, setShowCompanionsOnly] = useState(false);
+
+  const userId = 'mock-user-id'; // In real app, get from auth
+  const { companions } = useCompanions(userId);
 
   const {
     posts,
@@ -32,12 +36,22 @@ const FeedTab = () => {
     loadMorePosts,
     refreshPosts,
     createPost,
-    toggleLike,
+    loadCompanionPosts,
   } = usePosts();
 
-  const handleLike = useCallback((postId: string) => {
-    toggleLike(postId);
-  }, [toggleLike]);
+  const handleToggleCompanionFilter = useCallback(() => {
+    setShowCompanionsOnly(prev => !prev);
+    if (!showCompanionsOnly) {
+      // Load companion posts
+      const companionIds = companions.map(c => c.id);
+      if (companionIds.length > 0) {
+        loadCompanionPosts(companionIds);
+      }
+    } else {
+      // Load all posts
+      refreshPosts();
+    }
+  }, [showCompanionsOnly, companions, loadCompanionPosts, refreshPosts]);
 
   const handleComment = useCallback((postId: string) => {
     const post = posts.find(p => p.id === postId);
@@ -66,31 +80,49 @@ const FeedTab = () => {
   }, [hasMore, loading, loadMorePosts]);
 
   const renderPost = useCallback(({ item }: { item: PostType }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       activeOpacity={0.95}
       onPress={() => navigation.navigate('PostDetail', { post: item })}
     >
       <Post
         post={item}
-        onLike={handleLike}
         onComment={handleComment}
         onShare={handleShare}
         onUserPress={handleUserPress}
       />
     </TouchableOpacity>
-  ), [handleLike, handleComment, handleShare, handleUserPress, navigation]);
+  ), [handleComment, handleShare, handleUserPress, navigation]);
 
   const renderHeader = () => (
     <View style={styles.header}>
       <Text variant="h2" weight="bold">
         Feed
       </Text>
-      <TouchableOpacity
-        style={styles.createButton}
-        onPress={() => setShowCreatePost(true)}
-      >
-        <Icon name="plus" size={18} color={theme.colors.primary[500]} />
-      </TouchableOpacity>
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          style={[styles.filterButton, showCompanionsOnly && styles.filterButtonActive]}
+          onPress={handleToggleCompanionFilter}
+        >
+          <Icon
+            name="user-group"
+            size={16}
+            color={showCompanionsOnly ? theme.colors.white : theme.colors.primary[500]}
+          />
+          <Text
+            variant="caption"
+            color={showCompanionsOnly ? 'white' : 'primary.500'}
+            style={styles.filterText}
+          >
+            Companions
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.createButton}
+          onPress={() => setShowCreatePost(true)}
+        >
+          <Icon name="plus" size={18} color={theme.colors.primary[500]} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -162,10 +194,10 @@ const FeedTab = () => {
         data={posts}
         renderItem={renderPost}
         keyExtractor={item => item.id}
-        contentContainerStyle={[
-          styles.list,
-          posts.length === 0 && styles.emptyList,
-        ]}
+        style={styles.flatList}
+        contentContainerStyle={
+          posts.length === 0 ? styles.emptyList : styles.list
+        }
         ListEmptyComponent={!loading ? renderEmptyState : null}
         ListFooterComponent={renderFooter}
         onEndReached={handleLoadMore}
@@ -204,6 +236,30 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.gray[200],
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.primary[50],
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
+    gap: theme.spacing.xs,
+  },
+  filterButtonActive: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
+  },
+  filterText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.medium,
+  },
   createButton: {
     width: 36,
     height: 36,
@@ -212,11 +268,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  flatList: {
+    flex: 1,
+  },
   list: {
     paddingBottom: theme.spacing.lg,
   },
   emptyList: {
-    flex: 1,
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   emptyState: {
     flex: 1,

@@ -1,127 +1,241 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, FlatList } from 'react-native';
+import React, { useCallback } from 'react';
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  TouchableOpacity,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button } from '../components/ui';
+import { SwipeListView } from 'react-native-swipe-list-view';
+import { Text, ConversationListItem } from '../components/ui';
 import { theme } from '../constants/theme';
+import { useConversations } from '../hooks';
+import { TabScreenProps } from '../types';
+import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
 
-interface FavoriteItem {
-  id: string;
-  title: string;
-  description: string;
-  isFavorite: boolean;
-}
+const MOCK_USER_ID = 'mock-user-id'; // TODO: Replace with actual user ID from auth store
 
-const MessagesTab = () => {
-  const [favorites, setFavorites] = useState<FavoriteItem[]>([
-    {
-      id: '1',
-      title: 'Favorite Item 1',
-      description: 'This is your first favorite item',
-      isFavorite: true,
+const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
+  const {
+    conversations,
+    loading,
+    refreshing,
+    error,
+    hasMore,
+    loadMoreConversations,
+    refreshConversations,
+    markAsRead,
+    deleteConversation,
+  } = useConversations(MOCK_USER_ID);
+
+  const handleConversationPress = useCallback(
+    (conversationId: string) => {
+      markAsRead(conversationId);
+      (navigation as any).navigate('ChatScreen', { conversationId });
     },
-    {
-      id: '2',
-      title: 'Favorite Item 2',
-      description: 'This is another favorite item',
-      isFavorite: true,
-    },
-  ]);
+    [navigation, markAsRead]
+  );
 
-  const removeFavorite = (id: string) => {
-    setFavorites(prev => prev.filter(item => item.id !== id));
+  const handleLoadMore = useCallback(() => {
+    if (hasMore && !loading) {
+      loadMoreConversations();
+    }
+  }, [hasMore, loading, loadMoreConversations]);
+
+  const handleDelete = useCallback(
+    (conversationId: string) => {
+      deleteConversation(conversationId);
+    },
+    [deleteConversation]
+  );
+
+  const renderConversation = useCallback(
+    ({ item }: any) => (
+      <View style={styles.rowFront}>
+        <ConversationListItem
+          conversation={item}
+          currentUserId={MOCK_USER_ID}
+          onPress={handleConversationPress}
+        />
+      </View>
+    ),
+    [handleConversationPress]
+  );
+
+  const renderHiddenItem = useCallback(
+    ({ item }: any) => (
+      <View style={styles.rowBack}>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDelete(item.id)}
+        >
+          <FontAwesome6
+            name="trash"
+            size={20}
+            color={theme.colors.white}
+            iconStyle="solid"
+          />
+          <Text variant="body" color="white" style={styles.deleteText}>
+            Delete
+          </Text>
+        </TouchableOpacity>
+      </View>
+    ),
+    [handleDelete]
+  );
+
+  const renderEmptyState = () => {
+    if (loading && conversations.length === 0) {
+      return (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyState}>
+        <FontAwesome6
+          name="comments"
+          size={64}
+          color={theme.colors.gray[400]}
+          iconStyle="regular"
+        />
+        <Text variant="h3" color="gray.400" style={styles.emptyTitle}>
+          No Messages Yet
+        </Text>
+        <Text variant="body" color="gray.500" style={styles.emptyText}>
+          Start a conversation from a user's profile
+        </Text>
+      </View>
+    );
   };
 
-  const renderFavorite = ({ item }: { item: FavoriteItem }) => (
-    <View style={styles.favoriteItem}>
-      <View style={styles.favoriteContent}>
-        <Text variant="h4" style={styles.favoriteTitle}>
-          {item.title}
-        </Text>
-        <Text variant="body" color="gray.600">
-          {item.description}
-        </Text>
+  const renderFooter = () => {
+    if (!loading || conversations.length === 0) return null;
+
+    return (
+      <View style={styles.footer}>
+        <ActivityIndicator size="small" color={theme.colors.primary[500]} />
       </View>
-      <Button
-        variant="outline"
-        size="sm"
-        onPress={() => removeFavorite(item.id)}
-      >
-        Remove
-      </Button>
-    </View>
-  );
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text variant="h2" style={styles.title}>
-          Favorites
-        </Text>
-
-        {favorites.length > 0 ? (
-          <FlatList
-            data={favorites}
-            renderItem={renderFavorite}
-            keyExtractor={item => item.id}
-            style={styles.favoritesList}
-            showsVerticalScrollIndicator={false}
-          />
-        ) : (
-          <View style={styles.emptyState}>
-            <Text variant="h3" color="gray.400" style={styles.emptyTitle}>
-              No Favorites Yet
-            </Text>
-            <Text variant="body" color="gray.500" style={styles.emptyText}>
-              Items you mark as favorites will appear here
-            </Text>
-          </View>
-        )}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text variant="h2">Messages</Text>
       </View>
+
+      {/* Conversation list */}
+      <SwipeListView
+        data={conversations}
+        renderItem={renderConversation}
+        renderHiddenItem={renderHiddenItem}
+        keyExtractor={item => item.id}
+        contentContainerStyle={
+          conversations.length === 0 ? styles.emptyContainer : undefined
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshConversations}
+            tintColor={theme.colors.primary[500]}
+          />
+        }
+        ListEmptyComponent={renderEmptyState}
+        ListFooterComponent={renderFooter}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        showsVerticalScrollIndicator={false}
+        rightOpenValue={-100}
+        disableRightSwipe
+        stopRightSwipe={-100}
+      />
+
+      {/* Error message */}
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text variant="caption" color="error.500">
+            {error}
+          </Text>
+        </View>
+      )}
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
   },
-  content: {
-    flex: 1,
+  header: {
     paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray[200],
   },
-  title: {
-    marginBottom: theme.spacing.lg,
-  },
-  favoritesList: {
+  centerContainer: {
     flex: 1,
-  },
-  favoriteItem: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    padding: theme.spacing.md,
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing.md,
   },
-  favoriteContent: {
+  emptyContainer: {
     flex: 1,
-    marginRight: theme.spacing.md,
-  },
-  favoriteTitle: {
-    marginBottom: theme.spacing.xs,
   },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: theme.spacing.xl,
   },
   emptyTitle: {
+    marginTop: theme.spacing.lg,
     marginBottom: theme.spacing.sm,
   },
   emptyText: {
     textAlign: 'center',
+  },
+  footer: {
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+  errorContainer: {
+    position: 'absolute',
+    bottom: theme.spacing.md,
+    left: theme.spacing.md,
+    right: theme.spacing.md,
+    padding: theme.spacing.sm,
+    backgroundColor: theme.colors.error[50],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.error[200],
+  },
+  rowFront: {
+    backgroundColor: theme.colors.white,
+    flex: 1,
+  },
+  rowBack: {
+    alignItems: 'center',
+    backgroundColor: theme.colors.error[500],
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  deleteButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 100,
+    height: '100%',
+    flexDirection: 'row',
+    gap: theme.spacing.xs,
+    backgroundColor: theme.colors.error[500],
+  },
+  deleteText: {
+    fontWeight: theme.fontWeight.semibold,
   },
 });
 

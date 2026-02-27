@@ -1,76 +1,82 @@
 export const theme = {
   colors: {
+    // Brand primary - Warm browns (based on #927f61)
     primary: {
-      50: '#f0f9ff',
-      100: '#e0f2fe',
-      200: '#bae6fd',
-      300: '#7dd3fc',
-      400: '#38bdf8',
-      500: '#0ea5e9',
-      600: '#0284c7',
-      700: '#0369a1',
-      800: '#075985',
-      900: '#0c4a6e',
+      50: '#f7f3ee',   // Lightest cream - backgrounds
+      100: '#ece4d2',  // Light tan - cards, surfaces
+      200: '#dfd4bb',  // Lighter brown
+      300: '#cbb89a',  // Light-medium brown
+      400: '#b79f81',  // Medium-light brown
+      500: '#927f61',  // Main brand color - buttons, links
+      600: '#7a6a52',  // Darker brown - hover states
+      700: '#625543',  // Deep brown
+      800: '#4a4034',  // Very deep brown
+      900: '#322b25',  // Almost black brown
     },
+    // Secondary - Slightly lighter variation
     secondary: {
-      50: '#fafafa',
-      100: '#f4f4f5',
-      200: '#e4e4e7',
-      300: '#d4d4d8',
-      400: '#a1a1aa',
-      500: '#71717a',
-      600: '#52525b',
-      700: '#3f3f46',
-      800: '#27272a',
-      900: '#18181b',
+      50: '#f9f7f4',
+      100: '#f0ebe3',
+      200: '#e5dcc9',
+      300: '#d4c5aa',
+      400: '#c4ae8f',
+      500: '#b79f81',  // Secondary brand color
+      600: '#9d8769',
+      700: '#7d6c54',
+      800: '#5e523f',
+      900: '#3f382b',
     },
+    // Success - Earthy green
     success: {
-      50: '#f0fdf4',
-      100: '#dcfce7',
-      200: '#bbf7d0',
-      300: '#86efac',
-      400: '#4ade80',
-      500: '#22c55e',
-      600: '#16a34a',
-      700: '#15803d',
-      800: '#166534',
-      900: '#14532d',
+      50: '#f3f6f1',
+      100: '#e4ebe0',
+      200: '#c9d7c1',
+      300: '#a8bf9a',
+      400: '#87a773',
+      500: '#6b8f57',
+      600: '#567545',
+      700: '#455d37',
+      800: '#34452a',
+      900: '#232e1c',
     },
+    // Warning - Warm amber
     warning: {
-      50: '#fffbeb',
-      100: '#fef3c7',
-      200: '#fde68a',
-      300: '#fcd34d',
-      400: '#fbbf24',
-      500: '#f59e0b',
-      600: '#d97706',
-      700: '#b45309',
-      800: '#92400e',
-      900: '#78350f',
+      50: '#fdf8f0',
+      100: '#faefd9',
+      200: '#f5ddb3',
+      300: '#edc583',
+      400: '#e5ad53',
+      500: '#d99531',
+      600: '#b77a26',
+      700: '#95611f',
+      800: '#724a18',
+      900: '#503311',
     },
+    // Error - Muted red
     error: {
-      50: '#fef2f2',
-      100: '#fee2e2',
-      200: '#fecaca',
-      300: '#fca5a5',
-      400: '#f87171',
-      500: '#ef4444',
-      600: '#dc2626',
-      700: '#b91c1c',
-      800: '#991b1b',
-      900: '#7f1d1d',
+      50: '#fdf3f2',
+      100: '#fae3e1',
+      200: '#f5c7c3',
+      300: '#eca39d',
+      400: '#e37f77',
+      500: '#d95b51',
+      600: '#b74840',
+      700: '#953833',
+      800: '#722a27',
+      900: '#501d1b',
     },
+    // Neutral grays - Warm gray scale from cream to black
     gray: {
-      50: '#fafafa',
-      100: '#f4f4f5',
-      200: '#e4e4e7',
-      300: '#d4d4d8',
-      400: '#a1a1aa',
-      500: '#71717a',
-      600: '#52525b',
-      700: '#3f3f46',
-      800: '#27272a',
-      900: '#18181b',
+      50: '#f7f3ee',   // Cream
+      100: '#ece4d2',  // Light tan
+      200: '#d9cdb8',  // Tan
+      300: '#c0b09a',  // Medium tan
+      400: '#a1917a',  // Brown-gray
+      500: '#7d6f5d',  // Medium brown-gray
+      600: '#625547',  // Dark brown-gray
+      700: '#4a4034',  // Deep brown-gray
+      800: '#322b25',  // Very dark
+      900: '#1a1612',  // Almost black
     },
     white: '#ffffff',
     black: '#000000',

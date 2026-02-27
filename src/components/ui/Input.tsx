@@ -61,10 +61,6 @@ export const Input = forwardRef<TextInput, InputProps>(
     const isError = !!errorText;
     const isSecure = secureTextEntry && !isPasswordVisible;
 
-    const containerStyles: ViewStyle = {
-      marginBottom: theme.spacing.md,
-    };
-
     const inputContainerStyles: ViewStyle = {
       ...variantStyles[variant],
       borderRadius: theme.borderRadius.lg,
@@ -72,7 +68,6 @@ export const Input = forwardRef<TextInput, InputProps>(
       paddingVertical: theme.spacing.sm,
       flexDirection: 'row',
       alignItems: 'center',
-      minHeight: 44,
       ...(isFocused && {
         borderColor: theme.colors.primary[500],
         borderWidth: variant === 'filled' ? 1 : 2,
@@ -95,7 +90,7 @@ export const Input = forwardRef<TextInput, InputProps>(
     };
 
     return (
-      <View style={[containerStyles, containerStyle]}>
+      <View style={containerStyle}>
         {label && (
           <Text
             variant="label"

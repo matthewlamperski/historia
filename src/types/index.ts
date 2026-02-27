@@ -7,7 +7,9 @@ export type RootStackParamList = {
   Profile: { userId: string };
   ProfileView: { userId: string };
   PostDetail: { post: Post };
+  ChatScreen: { conversationId: string; otherUserId?: string };
   Settings: undefined;
+  BlockedUsers: undefined;
   // Add more screens as needed
 };
 
@@ -93,6 +95,9 @@ export interface User {
   followingCount: number;
   postCount: number;
   isVerified: boolean;
+  companions: string[]; // array of user IDs who are companions
+  visitedLandmarks: string[]; // array of landmark IDs visited
+  bookmarkedLandmarks: string[]; // array of landmark IDs bookmarked
   createdAt: string;
   updatedAt: string;
 }
@@ -104,8 +109,9 @@ export interface Post {
   user: User;
   content: string;
   images: string[];
-  likes: string[]; // array of user IDs who liked
   commentCount: number;
+  landmarkId?: string; // optional landmark ID if post is about a landmark
+  landmark?: Landmark; // optional populated landmark data
   location?: {
     latitude: number;
     longitude: number;
@@ -131,6 +137,7 @@ export interface Comment {
 export interface CreatePostData {
   content: string;
   images?: string[];
+  landmarkId?: string; // optional landmark ID
   location?: {
     latitude: number;
     longitude: number;
@@ -167,4 +174,198 @@ export interface Landmark {
 export interface FirebaseTimestamp {
   seconds: number;
   nanoseconds: number;
+}
+
+// Conversation types
+export interface Conversation {
+  id: string;
+  participants: string[];
+  participantDetails: User[];
+  lastMessage: string;
+  lastMessageSenderId: string;
+  lastMessageTimestamp: Date;
+  unreadCount: { [userId: string]: number };
+  type: 'direct' | 'group';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Message types
+export interface Message {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  sender: User;
+  text: string;
+  images: string[];
+  postReference?: {
+    postId: string;
+    content: string;
+    images: string[];
+    userId: string;
+    userName: string;
+  };
+  likes: string[];
+  isEmojiOnly: boolean;
+  readBy: string[];
+  timestamp: Date;
+  updatedAt: Date;
+}
+
+// Create Message types
+export interface CreateMessageData {
+  conversationId: string;
+  text: string;
+  images?: string[];
+  postReference?: {
+    postId: string;
+    content: string;
+    images: string[];
+    userId: string;
+    userName: string;
+  };
+}
+
+// Create Conversation types
+export interface CreateConversationData {
+  participantIds: string[];
+  initialMessage?: string;
+}
+
+// Visit types
+export interface Visit {
+  id: string;
+  userId: string;
+  landmarkId: string;
+  landmark?: Landmark; // populated landmark data
+  visitedAt: Date;
+  verificationLocation: {
+    latitude: number;
+    longitude: number;
+  };
+  notes?: string;
+  photos?: string[];
+  createdAt: Date;
+}
+
+// Companion Request types
+export interface CompanionRequest {
+  id: string;
+  senderId: string;
+  sender?: User; // populated sender data
+  receiverId: string;
+  receiver?: User; // populated receiver data
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Auth Navigation types
+export type AuthStackParamList = {
+  Login: undefined;
+  SignUp: undefined;
+  ForgotPassword: undefined;
+};
+
+export type AuthStackScreenProps<Screen extends keyof AuthStackParamList> =
+  NativeStackScreenProps<AuthStackParamList, Screen>;
+
+// Auth State types
+export interface AuthUser {
+  id: string;
+  email: string;
+  displayName?: string;
+  photoURL?: string;
+  emailVerified: boolean;
+  providerId: string;
+}
+
+// Report types
+export type ReportReason =
+  | 'spam'
+  | 'harassment'
+  | 'hate_speech'
+  | 'inappropriate_content'
+  | 'impersonation'
+  | 'other';
+
+export type ReportedType = 'user' | 'post' | 'comment' | 'message';
+
+export type ReportStatus = 'pending' | 'reviewing' | 'resolved' | 'dismissed';
+
+export interface ReportContentSnapshot {
+  content?: string;
+  images?: string[];
+  userName?: string;
+}
+
+export interface ReportResolution {
+  action: string;
+  adminId: string;
+  adminNotes?: string;
+  resolvedAt: Date;
+}
+
+export interface Report {
+  id: string;
+  reporterId: string;
+  reportedId: string; // userId, postId, commentId, or messageId
+  reportedType: ReportedType;
+  reportedUserId: string; // Author of reported content
+  reason: ReportReason;
+  description?: string;
+  status: ReportStatus;
+  contentSnapshot: ReportContentSnapshot;
+  resolution?: ReportResolution;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Block types
+export interface Block {
+  id: string; // Format: "{blockerId}_{blockedId}"
+  blockerId: string;
+  blockedId: string;
+  createdAt: Date;
+}
+
+// User Ban types
+export type BanType = 'temporary' | 'permanent';
+
+export interface UserBan {
+  id: string; // Same as userId
+  userId: string;
+  isBanned: boolean;
+  banType: BanType;
+  banExpiresAt?: Date;
+  banReason: string;
+  bannedBy: string;
+  bannedAt: Date;
+}
+
+// Moderation Action types
+export type ModerationActionType =
+  | 'warning'
+  | 'content_removed'
+  | 'temporary_ban'
+  | 'permanent_ban';
+
+export interface ModerationAction {
+  id: string;
+  reportId?: string;
+  targetUserId: string;
+  action: ModerationActionType;
+  adminId: string;
+  reason: string;
+  createdAt: Date;
+}
+
+// Create Report data
+export interface CreateReportData {
+  reportedId: string;
+  reportedType: ReportedType;
+  reportedUserId: string;
+  reason: ReportReason;
+  description?: string;
+  contentSnapshot: ReportContentSnapshot;
 }

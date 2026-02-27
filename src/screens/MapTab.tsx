@@ -1,11 +1,14 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react';
-import { View, StyleSheet, Text, Image, Dimensions, TouchableOpacity, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, Image, Dimensions, TouchableOpacity, ScrollView, Linking, Platform, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../constants/theme';
 import MapView, { Marker } from 'react-native-maps';
 import LocationSwitcherHeader from '../components/ui/LocationSwitcherHeader';
-import BottomSheet, { BottomSheetView, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
+import BottomSheet, { BottomSheetView, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Landmark } from '../types';
+import Icon from 'react-native-vector-icons/FontAwesome6';
+import { useLandmarks, useVisits } from '../hooks';
+import Geolocation from 'react-native-geolocation-service';
 
 // Cincinnati coordinates
 const CINCINNATI_REGION = {
@@ -126,15 +129,28 @@ const MapTab = () => {
   const { top } = useSafeAreaInsets();
   const bottomSheetRef = useRef<BottomSheet>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<Landmark | null>(null);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [hasVisited, setHasVisited] = useState(false);
+
+  const userId = 'mock-user-id'; // In real app, get from auth
+  const { bookmarkLandmark, unbookmarkLandmark } = useLandmarks(userId, false);
+  const { createVisit, hasVisited: checkVisited, verifyLocation } = useVisits(userId, false);
 
   // Bottom sheet snap points
-  const snapPoints = useMemo(() => ['25%', '50%', '90%'], []);
+  const snapPoints = useMemo(() => ['35%', '60%'], []);
 
   // Handle marker press
-  const handleMarkerPress = useCallback((landmark: Landmark) => {
+  const handleMarkerPress = useCallback(async (landmark: Landmark) => {
     setSelectedLandmark(landmark);
     bottomSheetRef.current?.expand();
-  }, []);
+
+    // Check if already bookmarked (mock - would check user data)
+    setIsBookmarked(false); // Replace with actual check
+
+    // Check if already visited
+    const visited = await checkVisited(landmark.id);
+    setHasVisited(visited);
+  }, [checkVisited]);
 
   // Handle bottom sheet close
   const handleSheetClose = useCallback(() => {
@@ -171,6 +187,89 @@ const MapTab = () => {
     }
   };
 
+  // Handle bookmark toggle
+  const handleBookmark = useCallback(async () => {
+    if (!selectedLandmark) return;
+
+    try {
+      if (isBookmarked) {
+        await unbookmarkLandmark(selectedLandmark.id);
+        setIsBookmarked(false);
+      } else {
+        await bookmarkLandmark(selectedLandmark.id);
+        setIsBookmarked(true);
+      }
+    } catch (error) {
+      console.error('Error toggling bookmark:', error);
+    }
+  }, [selectedLandmark, isBookmarked, bookmarkLandmark, unbookmarkLandmark]);
+
+  // Handle visit check-in
+  const handleVisit = useCallback(async () => {
+    if (!selectedLandmark) return;
+
+    try {
+      // Get current location
+      Geolocation.getCurrentPosition(
+        async (position) => {
+          const userLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+
+          // Verify location
+          const isInRange = verifyLocation(userLocation, selectedLandmark.coordinates);
+
+          if (!isInRange) {
+            Alert.alert(
+              'Too Far Away',
+              'You must be within 100 meters of the landmark to check in.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+
+          // Create visit
+          await createVisit(selectedLandmark.id, userLocation);
+          setHasVisited(true);
+          Alert.alert('Success!', 'You have checked in at this landmark!', [{ text: 'OK' }]);
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          Alert.alert('Location Error', 'Unable to get your current location.', [{ text: 'OK' }]);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    } catch (error) {
+      console.error('Error creating visit:', error);
+    }
+  }, [selectedLandmark, createVisit, verifyLocation]);
+
+  // Handle directions
+  const handleDirections = useCallback(() => {
+    if (!selectedLandmark) return;
+
+    const { latitude, longitude } = selectedLandmark.coordinates;
+    const label = encodeURIComponent(selectedLandmark.name);
+
+    const url = Platform.select({
+      ios: `maps://app?daddr=${latitude},${longitude}&q=${label}`,
+      android: `geo:0,0?q=${latitude},${longitude}(${label})`,
+    });
+
+    if (url) {
+      Linking.canOpenURL(url).then(supported => {
+        if (supported) {
+          Linking.openURL(url);
+        } else {
+          // Fallback to Google Maps web
+          const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+          Linking.openURL(googleMapsUrl);
+        }
+      });
+    }
+  }, [selectedLandmark]);
+
   return (
     <View style={[styles.container, { paddingTop: top }]}>
       <LocationSwitcherHeader title="Explore" />
@@ -205,9 +304,8 @@ const MapTab = () => {
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.bottomSheetHandle}
       >
-        <BottomSheetView style={styles.bottomSheetContent}>
-          {selectedLandmark && (
-            <ScrollView showsVerticalScrollIndicator={false}>
+        {selectedLandmark && (
+            <BottomSheetScrollView showsVerticalScrollIndicator={false}>
               {/* Header Image */}
               <Image
                 source={{ uri: selectedLandmark.images[0] }}
@@ -251,15 +349,59 @@ const MapTab = () => {
                     <Text style={styles.sectionText}>Hours: {selectedLandmark.visitingHours}</Text>
                   )}
                   {selectedLandmark.website && (
-                    <TouchableOpacity style={styles.websiteButton}>
+                    <TouchableOpacity
+                      style={styles.websiteButton}
+                      onPress={() => Linking.openURL(selectedLandmark.website || '')}
+                    >
                       <Text style={styles.websiteText}>Visit Website</Text>
                     </TouchableOpacity>
                   )}
                 </View>
+
+                {/* Action Buttons */}
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, isBookmarked && styles.actionBtnActive]}
+                    onPress={handleBookmark}
+                  >
+                    <Icon
+                      name="bookmark"
+                      size={18}
+                      color={isBookmarked ? theme.colors.white : theme.colors.primary[600]}
+                      solid={isBookmarked}
+                    />
+                    <Text style={[styles.actionBtnText, isBookmarked && styles.actionBtnTextActive]}>
+                      {isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, hasVisited && styles.actionBtnVisited]}
+                    onPress={handleVisit}
+                    disabled={hasVisited}
+                  >
+                    <Icon
+                      name="check-circle"
+                      size={18}
+                      color={hasVisited ? theme.colors.white : theme.colors.success[600]}
+                      solid={hasVisited}
+                    />
+                    <Text style={[styles.actionBtnText, hasVisited && styles.actionBtnTextActive]}>
+                      {hasVisited ? 'Visited' : 'Check In'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.actionBtn}
+                    onPress={handleDirections}
+                  >
+                    <Icon name="diamond-turn-right" size={18} color={theme.colors.primary[600]} />
+                    <Text style={styles.actionBtnText}>Directions</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </ScrollView>
+            </BottomSheetScrollView>
           )}
-        </BottomSheetView>
       </BottomSheet>
     </View>
   );
@@ -302,7 +444,7 @@ const styles = StyleSheet.create({
     width: 40,
   },
   bottomSheetContent: {
-    flex: 1,
+    // flex: 1,
   },
   landmarkImage: {
     width: screenWidth,
@@ -378,6 +520,40 @@ const styles = StyleSheet.create({
   websiteText: {
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
+    color: theme.colors.white,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.lg,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
+    backgroundColor: theme.colors.white,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[300],
+    borderRadius: theme.borderRadius.md,
+    gap: theme.spacing.xs,
+  },
+  actionBtnActive: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
+  },
+  actionBtnVisited: {
+    backgroundColor: theme.colors.success[500],
+    borderColor: theme.colors.success[500],
+  },
+  actionBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.primary[600],
+  },
+  actionBtnTextActive: {
     color: theme.colors.white,
   },
 });

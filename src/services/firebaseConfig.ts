@@ -1,29 +1,11 @@
-import { initializeApp, getApps } from '@react-native-firebase/app';
+// React Native Firebase auto-initializes from native config files:
+// - iOS: GoogleService-Info.plist
+// - Android: google-services.json
+// No need to call initializeApp() manually
+
 import firestore from '@react-native-firebase/firestore';
 import storage from '@react-native-firebase/storage';
 import auth from '@react-native-firebase/auth';
-
-// Firebase configuration - for development, using minimal config to prevent errors
-// For production, replace with your actual Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyC6iWREcoNo_IQ--rCZORs4evOMmhrIEnE",
-  authDomain: "historia-application.firebaseapp.com",
-  projectId: "historia-application",
-  storageBucket: "historia-application.firebasestorage.app",
-  messagingSenderId: "135408828364",
-  appId: "1:135408828364:web:65289ee646662bc66fa769",
-  measurementId: "G-EPLW4PV103"
-};
-
-// Initialize Firebase only if it hasn't been initialized
-const initializeFirebase = () => {
-  if (getApps().length === 0) {
-    initializeApp(firebaseConfig);
-  }
-};
-
-// Initialize Firebase
-initializeFirebase();
 
 // Export Firebase services
 export { firestore, storage, auth };
@@ -35,4 +17,13 @@ export const COLLECTIONS = {
   POSTS: 'posts',
   COMMENTS: 'comments',
   LANDMARKS: 'landmarks',
+  CONVERSATIONS: 'conversations',
+  MESSAGES: 'messages',
+  VISITS: 'visits',
+  COMPANION_REQUESTS: 'companionRequests',
+  // Moderation collections
+  REPORTS: 'reports',
+  BLOCKS: 'blocks',
+  USER_BANS: 'userBans',
+  MODERATION_ACTIONS: 'moderationActions',
 } as const;
