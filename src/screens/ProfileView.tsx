@@ -291,7 +291,7 @@ const ProfileView = () => {
             <Icon name="arrow-left" size={20} color={theme.colors.gray[700]} />
           </TouchableOpacity>
           <Text variant="h3" weight="semibold" style={styles.headerTitle}>
-            @{user.username}
+            {user.name}
           </Text>
           <TouchableOpacity style={styles.moreButton} onPress={handleMorePress}>
             <Icon name="ellipsis" size={20} color={theme.colors.gray[700]} />
@@ -321,9 +321,6 @@ const ProfileView = () => {
                 <Icon name="badge-check" size={20} color={theme.colors.primary[500]} />
               )}
             </View>
-            <Text variant="body" color="gray.600">
-              @{user.username}
-            </Text>
             {user.location && (
               <View style={styles.locationRow}>
                 <Icon name="location-dot" size={14} color={theme.colors.gray[500]} />

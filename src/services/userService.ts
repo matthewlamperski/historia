@@ -1,4 +1,5 @@
 import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import { COLLECTIONS } from './firebaseConfig';
 import { User } from '../types';
 
@@ -93,6 +94,31 @@ class UserService {
     } catch (error) {
       console.error('Error creating/updating user:', error);
       throw error;
+    }
+  }
+
+  // Update profile fields for the currently signed-in user
+  async updateUserProfile(
+    userId: string,
+    updates: Pick<Partial<User>, 'name' | 'bio' | 'location' | 'website' | 'avatar'>
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    // Update Firestore
+    await firestore()
+      .collection(COLLECTIONS.USERS)
+      .doc(userId)
+      .set({ ...updates, updatedAt: now }, { merge: true });
+
+    // Keep Firebase Auth displayName in sync
+    const currentUser = auth().currentUser;
+    if (currentUser) {
+      const authUpdates: { displayName?: string; photoURL?: string } = {};
+      if (updates.name !== undefined) authUpdates.displayName = updates.name;
+      if (updates.avatar !== undefined) authUpdates.photoURL = updates.avatar;
+      if (Object.keys(authUpdates).length > 0) {
+        await currentUser.updateProfile(authUpdates);
+      }
     }
   }
 }

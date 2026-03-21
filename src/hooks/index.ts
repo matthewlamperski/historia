@@ -12,5 +12,6 @@ export { useCompanions } from './useCompanions';
 export { useAuth } from './useAuth';
 export { useModeration } from './useModeration';
 export { useSubscription } from './useSubscription';
+export { useJournal } from './useJournal';
 
 // Add more custom hooks as they are created

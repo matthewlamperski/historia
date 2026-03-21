@@ -79,7 +79,7 @@ const PREMIUM_FEATURES: FeatureRowProps[] = [
   {
     icon: 'bookmark',
     title: 'Unlimited Bookmarks',
-    description: `Save as many sites as you want (free tier: ${FREE_BOOKMARK_LIMIT} bookmarks)`,
+    description: `Save as many sites as you want`,
     highlight: false,
   },
   {
@@ -98,12 +98,6 @@ const PREMIUM_FEATURES: FeatureRowProps[] = [
     icon: 'headset',
     title: 'Priority Support',
     description: 'Skip the queue — get help faster when you need it',
-    highlight: false,
-  },
-  {
-    icon: 'flask',
-    title: 'Early Beta Access',
-    description: 'Be first to try new features and exclusive events',
     highlight: false,
   },
 ];
@@ -273,7 +267,7 @@ export const SubscriptionScreen: React.FC = () => {
         </Animated.View>
 
         {/* Money-back guarantee card */}
-        <Animated.View
+        {/* <Animated.View
           style={[styles.guaranteeCard, { opacity: fadeAnim }]}
         >
           <View style={styles.guaranteeIconContainer}>
@@ -292,7 +286,7 @@ export const SubscriptionScreen: React.FC = () => {
               If you don't feel more grateful in 6 months, we'll refund you. No questions asked.
             </Text>
           </View>
-        </Animated.View>
+        </Animated.View> */}
 
         {/* Mission statement */}
         <View style={styles.missionCard}>

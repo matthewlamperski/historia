@@ -18,6 +18,8 @@ import { ChatScreen } from '../screens/ChatScreen';
 import { BlockedUsersScreen } from '../screens/BlockedUsersScreen';
 import { BanScreen } from '../screens/BanScreen';
 import { SubscriptionScreen } from '../screens/SubscriptionScreen';
+import { BookmarksScreen } from '../screens/BookmarksScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import { AuthNavigator } from './AuthNavigator';
 import { useModeration } from '../hooks';
 
@@ -142,6 +144,16 @@ const MainStackNavigator = () => {
         name="Subscription"
         component={SubscriptionScreen}
         options={{ presentation: 'modal', headerShown: false }}
+      />
+      <Stack.Screen
+        name="Bookmarks"
+        component={BookmarksScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

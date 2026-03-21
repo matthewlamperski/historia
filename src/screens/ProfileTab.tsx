@@ -1,137 +1,42 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { 
-  View, 
-  StyleSheet, 
-  ScrollView, 
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
   FlatList,
   TouchableOpacity,
   Image,
-  RefreshControl,
   ActivityIndicator,
-  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button, Post } from '../components/ui';
 import { theme } from '../constants/theme';
 import { useNavigation } from '@react-navigation/native';
-import { RootStackScreenProps, User, Post as PostType } from '../types';
+import { RootStackScreenProps, Post as PostType } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
-import { useImagePicker } from '../hooks/useImagePicker';
 import { useVisits, useSubscription } from '../hooks';
+import { useAuthStore } from '../store/authStore';
 
-// Mock current user data
-const CURRENT_USER: User = {
-  id: 'current-user-123',
-  name: 'John Doe',
-  username: 'johndoe',
-  email: 'john.doe@example.com',
-  avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-  bio: 'History enthusiast exploring Cincinnati\'s rich past 🏛️ | Sharing stories one landmark at a time ✨',
-  location: 'Cincinnati, OH',
-  website: 'https://johndoe.com',
-  followerCount: 1247,
-  followingCount: 432,
-  postCount: 89,
-  isVerified: false,
-  companions: ['mock-user-1', 'mock-user-2'],
-  visitedLandmarks: ['1', '2', '3'],
-  bookmarkedLandmarks: ['4', '5'],
-  isPremium: false,
-  pointsBalance: 0,
-  subscriptionStatus: 'free',
-  createdAt: '2024-01-15T10:30:00Z',
-  updatedAt: '2025-01-12T14:22:00Z'
-};
-
-// Mock user posts
-const USER_POSTS: PostType[] = [
-  {
-    id: 'post-1',
-    userId: 'current-user-123',
-    user: CURRENT_USER,
-    content: 'Just visited the Cincinnati Museum Center! The Art Deco architecture is absolutely breathtaking. Fun fact: it served as a prototype for many other train stations built in the 1930s. 🚂✨',
-    images: ['https://images.unsplash.com/photo-1580407196238-dac33f57c410?w=500'],
-    landmarkId: '1',
-    commentCount: 12,
-    location: {
-      latitude: 39.1097,
-      longitude: -84.5386,
-      address: '1301 Western Ave, Cincinnati, OH'
-    },
-    createdAt: new Date('2025-01-11T15:30:00Z'),
-    updatedAt: new Date('2025-01-11T15:30:00Z')
-  },
-  {
-    id: 'post-2',
-    userId: 'current-user-123',
-    user: CURRENT_USER,
-    content: 'Walking across the Roebling Suspension Bridge today reminded me that this beauty was actually the prototype for the Brooklyn Bridge! John Augustus Roebling\'s engineering genius spans both Cincinnati and New York. 🌉',
-    images: ['https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=500'],
-    landmarkId: '2',
-    commentCount: 8,
-    location: {
-      latitude: 39.0936,
-      longitude: -84.5092,
-      address: 'Roebling Bridge, Cincinnati, OH'
-    },
-    createdAt: new Date('2025-01-10T09:15:00Z'),
-    updatedAt: new Date('2025-01-10T09:15:00Z')
-  },
-  {
-    id: 'post-3',
-    userId: 'current-user-123',
-    user: CURRENT_USER,
-    content: 'Found this hidden gem at Fountain Square today! The Tyler Davidson Fountain has been the heart of Cincinnati since 1871. It\'s amazing how this space has witnessed over 150 years of city life. 💫',
-    images: ['https://images.unsplash.com/photo-1573160813959-df05c1b8b5c4?w=500'],
-    landmarkId: '3',
-    commentCount: 5,
-    createdAt: new Date('2025-01-09T12:45:00Z'),
-    updatedAt: new Date('2025-01-09T12:45:00Z')
-  }
-];
+// TODO: Replace with usePosts(currentUserId) when posts feed is wired to Firebase
+const USER_POSTS: PostType[] = [];
 
 const ProfileTab = () => {
   const navigation = useNavigation<RootStackScreenProps<'Main'>['navigation']>();
-  const { selectedImages, pickImages, clearImages } = useImagePicker();
-  const [user, setUser] = useState<User>(CURRENT_USER);
-  const [posts, _setPosts] = useState<PostType[]>(USER_POSTS);
-  const [_loading, _setLoading] = useState(false);
-  const [_refreshing, _setRefreshing] = useState(false);
-  const [isEditingBio, setIsEditingBio] = useState(false);
-  const [bioText, _setBioText] = useState(user.bio || '');
+  const [posts] = useState<PostType[]>(USER_POSTS);
 
-  const currentUserId = 'current-user-123';
-  const { visits } = useVisits(currentUserId, true);
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
+
+  const { visits } = useVisits(currentUserId, !!currentUserId);
   const { isPremium, isOnTrial, showSubscriptionScreen } = useSubscription();
 
-  const handleEditProfile = () => {
-    console.log('Edit profile pressed');
-    // In a real app, this would open an edit profile modal
-  };
+  const handleEditProfile = useCallback(() => {
+    navigation.navigate('EditProfile');
+  }, [navigation]);
 
-  const handleSettings = () => {
+  const handleSettings = useCallback(() => {
     navigation.navigate('Settings');
-  };
-
-  const handleChangeAvatar = useCallback(async () => {
-    try {
-      await pickImages();
-      if (selectedImages.length > 0) {
-        // In a real app, you would upload this to your server
-        setUser(prev => ({ ...prev, avatar: selectedImages[0] }));
-        clearImages();
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to change profile picture');
-    }
-  }, [pickImages, selectedImages, clearImages]);
-
-  const handleSaveBio = useCallback(() => {
-    setUser(prev => ({ ...prev, bio: bioText }));
-    setIsEditingBio(false);
-    // In a real app, save to server
-  }, [bioText]);
-
+  }, [navigation]);
 
   const handleComment = useCallback((postId: string) => {
     const post = posts.find(p => p.id === postId);
@@ -162,17 +67,27 @@ const ProfileTab = () => {
     </TouchableOpacity>
   ), [handleComment, handleShare, handleUserPress, navigation]);
 
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const renderHeader = () => (
     <View style={styles.profileContent}>
       {/* Profile Header */}
       <View style={styles.profileHeader}>
-        <TouchableOpacity onPress={handleChangeAvatar} style={styles.avatarContainer}>
+        <TouchableOpacity onPress={handleEditProfile} style={styles.avatarContainer}>
           {user.avatar ? (
             <Image source={{ uri: user.avatar }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
               <Text variant="h2" color="white" weight="bold">
-                {user.name.split(' ').map(n => n[0]).join('')}
+                {(user.name ?? '').split(' ').map(n => n[0]).filter(Boolean).join('') || '?'}
               </Text>
             </View>
           )}
@@ -180,62 +95,42 @@ const ProfileTab = () => {
             <Icon name="camera" size={14} color={theme.colors.white} />
           </View>
         </TouchableOpacity>
-        
+
         <View style={styles.userInfo}>
           <View style={styles.userNameRow}>
             <Text variant="h3" style={styles.userName}>
-              {user.name}
+              {user.name ?? 'Anonymous'}
             </Text>
             {user.isVerified && (
               <Icon name="badge-check" size={20} color={theme.colors.primary[500]} />
             )}
           </View>
-          <Text variant="body" color="gray.600">
-            @{user.username}
-          </Text>
-          {user.location && (
+          {user.location ? (
             <View style={styles.locationRow}>
               <Icon name="location-dot" size={14} color={theme.colors.gray[500]} />
               <Text variant="caption" color="gray.500" style={styles.locationText}>
                 {user.location}
               </Text>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
-      {/* Bio Section */}
+      {/* Bio / Website */}
       <View style={styles.bioSection}>
-        {isEditingBio ? (
-          <View style={styles.bioEditContainer}>
-            <Text variant="body" style={styles.bioText}>
-              {bioText}
-            </Text>
-            <View style={styles.bioActions}>
-              <TouchableOpacity onPress={() => setIsEditingBio(false)}>
-                <Text variant="body" color="gray.500">Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleSaveBio}>
-                <Text variant="body" color="primary.500" weight="medium">Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <TouchableOpacity onPress={() => setIsEditingBio(true)}>
-            <Text variant="body" style={styles.bioText}>
-              {user.bio || 'Add a bio to tell people more about yourself...'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        
-        {user.website && (
+        <TouchableOpacity onPress={handleEditProfile}>
+          <Text variant="body" style={styles.bioText}>
+            {user.bio || 'Tap Edit Profile to add a bio...'}
+          </Text>
+        </TouchableOpacity>
+        {user.website ? (
           <TouchableOpacity style={styles.websiteLink}>
             <Icon name="link" size={14} color={theme.colors.primary[500]} />
             <Text variant="body" color="primary.500" style={styles.websiteText}>
               {user.website}
             </Text>
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
 
       {/* Action Buttons */}
@@ -302,7 +197,7 @@ const ProfileTab = () => {
             <Text variant="caption" weight="bold" style={styles.premiumPromoCtaText}>
               Try Free
             </Text>
-            <Icon name="chevron-right" size={10} color={theme.colors.primary[600]} solid />
+            <Icon name="chevron-right" size={10} color={theme.colors.white} solid />
           </View>
         </TouchableOpacity>
       )}
@@ -343,6 +238,28 @@ const ProfileTab = () => {
         </View>
       )}
 
+      {/* Saved Landmarks Section */}
+      <TouchableOpacity
+        style={styles.bookmarksRow}
+        onPress={() => navigation.navigate('Bookmarks')}
+        activeOpacity={0.75}
+      >
+        <View style={styles.bookmarksRowLeft}>
+          <View style={styles.bookmarksIcon}>
+            <Icon name="bookmark" size={15} color={theme.colors.primary[500]} solid />
+          </View>
+          <Text variant="label" weight="medium" style={styles.bookmarksLabel}>
+            Saved Landmarks
+          </Text>
+          <View style={styles.bookmarksCount}>
+            <Text variant="caption" weight="bold" style={styles.bookmarksCountText}>
+              {user.bookmarkedLandmarks?.length ?? 0}
+            </Text>
+          </View>
+        </View>
+        <Icon name="chevron-right" size={14} color={theme.colors.gray[400]} />
+      </TouchableOpacity>
+
       {/* Posts Section Header */}
       <View style={styles.postsHeader}>
         <Text variant="h4" weight="semibold">
@@ -369,6 +286,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   list: {
     paddingBottom: theme.spacing.lg,
@@ -437,17 +359,6 @@ const styles = StyleSheet.create({
   bioText: {
     lineHeight: 22,
     marginBottom: theme.spacing.sm,
-  },
-  bioEditContainer: {
-    borderWidth: 1,
-    borderColor: theme.colors.gray[200],
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing.sm,
-  },
-  bioActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing.sm,
   },
   websiteLink: {
     flexDirection: 'row',
@@ -592,6 +503,46 @@ const styles = StyleSheet.create({
     gap: theme.spacing.xs,
   },
   visitCheckText: {
+    fontSize: theme.fontSize.xs,
+  },
+  bookmarksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.gray[50],
+    borderRadius: theme.borderRadius.xl,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+    marginBottom: theme.spacing.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.gray[200],
+  },
+  bookmarksRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  bookmarksIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bookmarksLabel: {
+    color: theme.colors.gray[800],
+  },
+  bookmarksCount: {
+    backgroundColor: theme.colors.primary[100],
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 2,
+    minWidth: 26,
+    alignItems: 'center',
+  },
+  bookmarksCountText: {
+    color: theme.colors.primary[700],
     fontSize: theme.fontSize.xs,
   },
   postsHeader: {

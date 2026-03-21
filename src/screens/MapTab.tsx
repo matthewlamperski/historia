@@ -1,14 +1,17 @@
 import React, { useMemo, useRef, useCallback, useState } from 'react';
-import { View, StyleSheet, Text, Image, Dimensions, TouchableOpacity, ScrollView, Linking, Platform, Alert } from 'react-native';
+import { View, StyleSheet, Text, Alert, Platform, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../constants/theme';
 import MapView, { Marker } from 'react-native-maps';
 import LocationSwitcherHeader from '../components/ui/LocationSwitcherHeader';
-import BottomSheet, { BottomSheetView, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import { TouchableOpacity } from 'react-native';
 import { useLandmarks, useVisits, useSubscription } from '../hooks';
 import Geolocation from 'react-native-geolocation-service';
+import { useAuthStore } from '../store/authStore';
+import LandmarkDetailSheet, { getCategoryColor } from '../components/ui/LandmarkDetailSheet';
 
 // Cincinnati coordinates
 const CINCINNATI_REGION = {
@@ -123,8 +126,6 @@ const CINCINNATI_LANDMARKS: Landmark[] = [
   }
 ];
 
-const { width: screenWidth } = Dimensions.get('window');
-
 const MapTab = () => {
   const { top } = useSafeAreaInsets();
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -132,7 +133,9 @@ const MapTab = () => {
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [hasVisited, setHasVisited] = useState(false);
 
-  const userId = 'mock-user-id'; // In real app, get from auth
+  const { user, updateUser } = useAuthStore();
+  const userId = user?.id ?? '';
+
   const { bookmarkLandmark, unbookmarkLandmark } = useLandmarks(userId, false);
   const { createVisit, hasVisited: checkVisited, verifyLocation } = useVisits(userId, false);
   const { isPremium, requirePremium } = useSubscription();
@@ -148,13 +151,13 @@ const MapTab = () => {
     setSelectedLandmark(landmark);
     bottomSheetRef.current?.expand();
 
-    // Check if already bookmarked (mock - would check user data)
-    setIsBookmarked(false); // Replace with actual check
+    // Check if already bookmarked using auth store data
+    setIsBookmarked(user?.bookmarkedLandmarks?.includes(landmark.id) ?? false);
 
     // Check if already visited
     const visited = await checkVisited(landmark.id);
     setHasVisited(visited);
-  }, [checkVisited]);
+  }, [checkVisited, user]);
 
   // Handle bottom sheet close
   const handleSheetClose = useCallback(() => {
@@ -175,30 +178,19 @@ const MapTab = () => {
     []
   );
 
-  // Get category color
-  const getCategoryColor = (category: Landmark['category']) => {
-    switch (category) {
-      case 'monument':
-        return theme.colors.primary[500];
-      case 'building':
-        return theme.colors.warning[500];
-      case 'site':
-        return theme.colors.success[500];
-      case 'battlefield':
-        return theme.colors.error[500];
-      default:
-        return theme.colors.secondary[500];
-    }
-  };
-
   // Handle bookmark toggle (free tier limited to FREE_BOOKMARK_LIMIT bookmarks)
   const handleBookmark = useCallback(async () => {
-    if (!selectedLandmark) return;
+    if (!selectedLandmark || !userId) return;
 
     if (isBookmarked) {
       try {
         await unbookmarkLandmark(selectedLandmark.id);
         setIsBookmarked(false);
+        updateUser({
+          bookmarkedLandmarks: (user?.bookmarkedLandmarks ?? []).filter(
+            id => id !== selectedLandmark.id
+          ),
+        });
       } catch (error) {
         console.error('Error removing bookmark:', error);
       }
@@ -206,9 +198,7 @@ const MapTab = () => {
     }
 
     // Adding a new bookmark — check free tier limit
-    // In production, currentBookmarkCount comes from user.bookmarkedLandmarks.length
-    // For now we use a mock check; real integration wires authStore user data
-    const currentBookmarkCount = 0; // TODO: replace with authStore user.bookmarkedLandmarks.length
+    const currentBookmarkCount = user?.bookmarkedLandmarks?.length ?? 0;
     const atFreeLimit = !isPremium && currentBookmarkCount >= FREE_BOOKMARK_LIMIT;
 
     if (atFreeLimit) {
@@ -219,10 +209,16 @@ const MapTab = () => {
     try {
       await bookmarkLandmark(selectedLandmark.id);
       setIsBookmarked(true);
+      updateUser({
+        bookmarkedLandmarks: [
+          ...(user?.bookmarkedLandmarks ?? []),
+          selectedLandmark.id,
+        ],
+      });
     } catch (error) {
       console.error('Error bookmarking landmark:', error);
     }
-  }, [selectedLandmark, isBookmarked, bookmarkLandmark, unbookmarkLandmark, isPremium, requirePremium, FREE_BOOKMARK_LIMIT]);
+  }, [selectedLandmark, userId, isBookmarked, bookmarkLandmark, unbookmarkLandmark, isPremium, requirePremium, FREE_BOOKMARK_LIMIT, user, updateUser]);
 
   // Handle offline map download (premium only)
   const handleOfflineMapDownload = useCallback(() => {
@@ -313,7 +309,7 @@ const MapTab = () => {
   return (
     <View style={[styles.container, { paddingTop: top }]}>
       <LocationSwitcherHeader title="Explore" />
-      
+
       <View style={styles.mapContainer}>
         <MapView
           style={styles.map}
@@ -366,103 +362,15 @@ const MapTab = () => {
         handleIndicatorStyle={styles.bottomSheetHandle}
       >
         {selectedLandmark && (
-            <BottomSheetScrollView showsVerticalScrollIndicator={false}>
-              {/* Header Image */}
-              <Image
-                source={{ uri: selectedLandmark.images[0] }}
-                style={styles.landmarkImage}
-                resizeMode="cover"
-              />
-              
-              {/* Content */}
-              <View style={styles.landmarkContent}>
-                {/* Title and Category */}
-                <View style={styles.landmarkHeader}>
-                  <Text style={styles.landmarkTitle}>{selectedLandmark.name}</Text>
-                  <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(selectedLandmark.category) }]}>
-                    <Text style={styles.categoryText}>
-                      {selectedLandmark.category.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Year and Address */}
-                <View style={styles.landmarkMeta}>
-                  {selectedLandmark.yearBuilt && (
-                    <Text style={styles.yearText}>Built in {selectedLandmark.yearBuilt}</Text>
-                  )}
-                  <Text style={styles.addressText}>{selectedLandmark.address}</Text>
-                </View>
-
-                {/* Description */}
-                <Text style={styles.descriptionText}>{selectedLandmark.description}</Text>
-
-                {/* Historical Significance */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Historical Significance</Text>
-                  <Text style={styles.sectionText}>{selectedLandmark.historicalSignificance}</Text>
-                </View>
-
-                {/* Visiting Information */}
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Visit Information</Text>
-                  {selectedLandmark.visitingHours && (
-                    <Text style={styles.sectionText}>Hours: {selectedLandmark.visitingHours}</Text>
-                  )}
-                  {selectedLandmark.website && (
-                    <TouchableOpacity
-                      style={styles.websiteButton}
-                      onPress={() => Linking.openURL(selectedLandmark.website || '')}
-                    >
-                      <Text style={styles.websiteText}>Visit Website</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {/* Action Buttons */}
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, isBookmarked && styles.actionBtnActive]}
-                    onPress={handleBookmark}
-                  >
-                    <Icon
-                      name="bookmark"
-                      size={18}
-                      color={isBookmarked ? theme.colors.white : theme.colors.primary[600]}
-                      solid={isBookmarked}
-                    />
-                    <Text style={[styles.actionBtnText, isBookmarked && styles.actionBtnTextActive]}>
-                      {isBookmarked ? 'Bookmarked' : 'Bookmark'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.actionBtn, hasVisited && styles.actionBtnVisited]}
-                    onPress={handleVisit}
-                    disabled={hasVisited}
-                  >
-                    <Icon
-                      name="check-circle"
-                      size={18}
-                      color={hasVisited ? theme.colors.white : theme.colors.success[600]}
-                      solid={hasVisited}
-                    />
-                    <Text style={[styles.actionBtnText, hasVisited && styles.actionBtnTextActive]}>
-                      {hasVisited ? 'Visited' : 'Check In'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.actionBtn}
-                    onPress={handleDirections}
-                  >
-                    <Icon name="diamond-turn-right" size={18} color={theme.colors.primary[600]} />
-                    <Text style={styles.actionBtnText}>Directions</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </BottomSheetScrollView>
-          )}
+          <LandmarkDetailSheet
+            landmark={selectedLandmark}
+            isBookmarked={isBookmarked}
+            hasVisited={hasVisited}
+            onBookmark={handleBookmark}
+            onVisit={handleVisit}
+            onDirections={handleDirections}
+          />
+        )}
       </BottomSheet>
     </View>
   );
@@ -532,119 +440,6 @@ const styles = StyleSheet.create({
   bottomSheetHandle: {
     backgroundColor: theme.colors.gray[300],
     width: 40,
-  },
-  bottomSheetContent: {
-    // flex: 1,
-  },
-  landmarkImage: {
-    width: screenWidth,
-    height: 200,
-  },
-  landmarkContent: {
-    padding: theme.spacing.md,
-  },
-  landmarkHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing.sm,
-  },
-  landmarkTitle: {
-    flex: 1,
-    fontSize: theme.fontSize['2xl'],
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.gray[900],
-    marginRight: theme.spacing.sm,
-  },
-  categoryBadge: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.borderRadius.full,
-  },
-  categoryText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.white,
-  },
-  landmarkMeta: {
-    marginBottom: theme.spacing.md,
-  },
-  yearText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.primary[600],
-    marginBottom: theme.spacing.xs,
-  },
-  addressText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.gray[600],
-  },
-  descriptionText: {
-    fontSize: theme.fontSize.base,
-    lineHeight: 24,
-    color: theme.colors.gray[700],
-    marginBottom: theme.spacing.lg,
-  },
-  section: {
-    marginBottom: theme.spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.gray[900],
-    marginBottom: theme.spacing.sm,
-  },
-  sectionText: {
-    fontSize: theme.fontSize.base,
-    lineHeight: 22,
-    color: theme.colors.gray[700],
-  },
-  websiteButton: {
-    backgroundColor: theme.colors.primary[500],
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.borderRadius.md,
-    alignSelf: 'flex-start',
-    marginTop: theme.spacing.sm,
-  },
-  websiteText: {
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.white,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.xs,
-    backgroundColor: theme.colors.white,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[300],
-    borderRadius: theme.borderRadius.md,
-    gap: theme.spacing.xs,
-  },
-  actionBtnActive: {
-    backgroundColor: theme.colors.primary[500],
-    borderColor: theme.colors.primary[500],
-  },
-  actionBtnVisited: {
-    backgroundColor: theme.colors.success[500],
-    borderColor: theme.colors.success[500],
-  },
-  actionBtnText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.colors.primary[600],
-  },
-  actionBtnTextActive: {
-    color: theme.colors.white,
   },
 });
 

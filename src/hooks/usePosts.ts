@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Post, CreatePostData } from '../types';
 import { postsService } from '../services/postsService';
 import { useToast } from './useToast';
+import { useAuthStore } from '../store/authStore';
 
 export interface UsePostsReturn {
   posts: Post[];
@@ -24,7 +25,8 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [lastPostId, setLastPostId] = useState<string | undefined>();
-  
+
+  const { user } = useAuthStore();
   const { showToast } = useToast();
 
   const loadPosts = useCallback(async () => {
@@ -86,11 +88,12 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
   }, [showToast]);
 
   const createPost = useCallback(async (postData: CreatePostData) => {
+    if (!user) {
+      showToast('You must be signed in to post', 'error');
+      return;
+    }
     try {
-      // For now, we'll use a mock user ID. In a real app, this would come from auth
-      const userId = 'mock-user-id';
-      
-      const newPost = await postsService.createPost(postData, userId);
+      const newPost = await postsService.createPost(postData, user.id, user);
       setPosts(prev => [newPost, ...prev]);
       showToast('Post created successfully!', 'success');
     } catch (err) {
@@ -98,7 +101,7 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
       showToast(errorMessage, 'error');
       throw err;
     }
-  }, [showToast]);
+  }, [user, showToast]);
 
   const loadCompanionPosts = useCallback(async (companionIds: string[]) => {
     try {

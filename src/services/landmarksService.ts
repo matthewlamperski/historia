@@ -198,9 +198,11 @@ class LandmarksService {
 
   // Get a single landmark by ID
   async getLandmark(landmarkId: string): Promise<Landmark | null> {
+    // Always check local data first — the app's displayed landmarks use these IDs
+    const local = CINCINNATI_LANDMARKS.find(l => l.id === landmarkId);
+
     if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return CINCINNATI_LANDMARKS.find(l => l.id === landmarkId) || null;
+      return local || null;
     }
 
     try {
@@ -209,15 +211,16 @@ class LandmarksService {
         .doc(landmarkId)
         .get();
 
-      if (!doc.exists) return null;
+      const docData = doc.data();
+      if (docData) {
+        return { id: doc.id, ...docData } as Landmark;
+      }
 
-      return {
-        id: doc.id,
-        ...doc.data(),
-      } as Landmark;
+      // Document not in Firestore — fall back to local data
+      return local || null;
     } catch (error) {
       console.error('Error fetching landmark:', error);
-      return null;
+      return local || null;
     }
   }
 
@@ -230,12 +233,14 @@ class LandmarksService {
     }
 
     try {
+      // Use set+merge so this works even if the user doc doesn't exist yet
       await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(userId)
-        .update({
-          bookmarkedLandmarks: firestore.FieldValue.arrayUnion(landmarkId),
-        });
+        .set(
+          { bookmarkedLandmarks: firestore.FieldValue.arrayUnion(landmarkId) },
+          { merge: true }
+        );
     } catch (error) {
       console.error('Error bookmarking landmark:', error);
       throw error;
@@ -254,9 +259,10 @@ class LandmarksService {
       await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(userId)
-        .update({
-          bookmarkedLandmarks: firestore.FieldValue.arrayRemove(landmarkId),
-        });
+        .set(
+          { bookmarkedLandmarks: firestore.FieldValue.arrayRemove(landmarkId) },
+          { merge: true }
+        );
     } catch (error) {
       console.error('Error unbookmarking landmark:', error);
       throw error;
@@ -267,8 +273,7 @@ class LandmarksService {
   async getBookmarkedLandmarks(userId: string): Promise<Landmark[]> {
     if (!this.isFirebaseAvailable()) {
       await new Promise<void>(resolve => setTimeout(resolve, 300));
-      // Return first 2 landmarks as mock bookmarks
-      return CINCINNATI_LANDMARKS.slice(0, 2);
+      return [];
     }
 
     try {
@@ -277,15 +282,17 @@ class LandmarksService {
         .doc(userId)
         .get();
 
-      const bookmarkedIds = userDoc.data()?.bookmarkedLandmarks || [];
+      const data = userDoc.data();
+      if (!data) return [];
 
+      const bookmarkedIds: string[] = data.bookmarkedLandmarks || [];
       if (bookmarkedIds.length === 0) return [];
 
       const landmarks = await Promise.all(
         bookmarkedIds.map((id: string) => this.getLandmark(id))
       );
 
-      return landmarks.filter(l => l !== null) as Landmark[];
+      return landmarks.filter((l): l is Landmark => l !== null);
     } catch (error) {
       console.error('Error fetching bookmarked landmarks:', error);
       return [];

@@ -28,4 +28,6 @@ export const COLLECTIONS = {
   MODERATION_ACTIONS: 'moderationActions',
   // Subscription
   SUBSCRIPTIONS: 'subscriptions',
+  // Gratitude journal
+  JOURNAL: 'journal',
 } as const;

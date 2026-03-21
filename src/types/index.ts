@@ -11,6 +11,8 @@ export type RootStackParamList = {
   Settings: undefined;
   BlockedUsers: undefined;
   Subscription: undefined;
+  Bookmarks: undefined;
+  EditProfile: undefined;
   // Add more screens as needed
 };
 
@@ -115,7 +117,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  username: string;
+  username?: string;
   avatar?: string;
   bio?: string;
   location?: string;

@@ -12,6 +12,9 @@ export { MessageInput } from './MessageInput';
 export { ActionSheet } from './ActionSheet';
 export { ReportModal } from './ReportModal';
 export { PremiumGate } from './PremiumGate';
+export { default as LandmarkDetailSheet } from './LandmarkDetailSheet';
+export type { LandmarkDetailSheetProps } from './LandmarkDetailSheet';
+export { JournalModal } from './JournalModal';
 
 // Add more UI components as they are created
 export type { ButtonVariant, ButtonSize } from '../../types';

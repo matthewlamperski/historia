@@ -133,9 +133,6 @@ export const BlockedUsersScreen: React.FC<
               <Text variant="body" weight="semibold">
                 {userName}
               </Text>
-              <Text variant="caption" color="gray.500">
-                @{item.userDetails?.username || 'unknown'}
-              </Text>
             </View>
           </View>
 

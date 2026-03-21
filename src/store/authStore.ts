@@ -366,12 +366,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // Create user profile in Firestore
   createUserProfile: async (userId, email, displayName, photoURL) => {
     const now = new Date().toISOString();
-    const username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '_');
 
     const newUser: Omit<User, 'id'> = {
       name: displayName,
       email,
-      username,
       avatar: photoURL,
       bio: undefined,
       location: undefined,

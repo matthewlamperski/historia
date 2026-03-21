@@ -2,6 +2,9 @@ import { useCallback, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import { COLLECTIONS } from '../services/firebaseConfig';
+import { User } from '../types';
 
 export interface UseAuthReturn {
   // State
@@ -46,6 +49,7 @@ export const useAuth = (): UseAuthReturn => {
     signOut,
     resetPassword,
     fetchUserProfile,
+    createUserProfile,
   } = useAuthStore();
 
   const { initialize: initSubscription, teardown: teardownSubscription } = useSubscriptionStore();
@@ -67,7 +71,35 @@ export const useAuth = (): UseAuthReturn => {
 
         // Fetch user profile from Firestore
         const userProfile = await fetchUserProfile(firebaseUser.uid);
-        setUser(userProfile);
+
+        if (userProfile) {
+          // Sync name/avatar from Firebase Auth (important for Google/Apple users)
+          const authName = firebaseUser.displayName;
+          const authPhoto = firebaseUser.photoURL;
+          const updates: Partial<User> = {};
+          if (authName && authName !== userProfile.name) { updates.name = authName; }
+          if (authPhoto && authPhoto !== userProfile.avatar) { updates.avatar = authPhoto; }
+
+          if (Object.keys(updates).length > 0) {
+            firestore()
+              .collection(COLLECTIONS.USERS)
+              .doc(firebaseUser.uid)
+              .set(updates, { merge: true })
+              .catch(console.error);
+            setUser({ ...userProfile, ...updates });
+          } else {
+            setUser(userProfile);
+          }
+        } else {
+          // Profile missing (signup race or failed write) — auto-create from Firebase Auth
+          const newProfile = await createUserProfile(
+            firebaseUser.uid,
+            firebaseUser.email ?? '',
+            firebaseUser.displayName ?? firebaseUser.email?.split('@')[0] ?? 'User',
+            firebaseUser.photoURL ?? undefined
+          );
+          setUser(newProfile);
+        }
 
         // Initialize subscription store for this user
         initSubscription(firebaseUser.uid);
@@ -81,7 +113,7 @@ export const useAuth = (): UseAuthReturn => {
       setInitialized(true);
       setLoading(false);
     },
-    [fetchUserProfile, setUser, setAuthUser, setInitialized, setLoading, initSubscription, teardownSubscription]
+    [fetchUserProfile, createUserProfile, setUser, setAuthUser, setInitialized, setLoading, initSubscription, teardownSubscription]
   );
 
   // Set up auth state listener on mount

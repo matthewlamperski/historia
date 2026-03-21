@@ -338,7 +338,7 @@ class PostsService {
             .doc(data.userId)
             .get();
 
-          const user = userDoc.data() as User;
+          const user = { id: data.userId, ...userDoc.data() } as User;
 
           // Get landmark data if present
           let landmark: Landmark | undefined;
@@ -402,8 +402,8 @@ class PostsService {
                 .collection(COLLECTIONS.USERS)
                 .doc(data.userId)
                 .get();
-              
-              const user = userDoc.data() as User;
+
+              const user = { id: data.userId, ...userDoc.data() } as User;
 
               return {
                 id: doc.id,
@@ -426,7 +426,7 @@ class PostsService {
   }
 
   // Create a new post
-  async createPost(postData: CreatePostData, userId: string): Promise<Post> {
+  async createPost(postData: CreatePostData, userId: string, currentUser?: User): Promise<Post> {
     // Validate photo limit (max 10 photos)
     if (postData.images && postData.images.length > 10) {
       throw new Error('Maximum 10 photos allowed per post');
@@ -435,7 +435,7 @@ class PostsService {
     if (!this.isFirebaseAvailable()) {
       // Mock implementation
       await new Promise<void>(resolve => setTimeout(resolve, 1000)); // Simulate upload delay
-      const user = mockUsers.find(u => u.id === userId) || mockUsers[0];
+      const user = currentUser || mockUsers.find(u => u.id === userId) || mockUsers[0];
 
       let landmark: Landmark | undefined;
       if (postData.landmarkId) {
@@ -478,13 +478,17 @@ class PostsService {
         .collection(COLLECTIONS.POSTS)
         .add(newPost);
 
-      // Get user data
-      const userDoc = await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(userId)
-        .get();
-
-      const user = userDoc.data() as User;
+      // Use the passed user object if available, otherwise fetch from Firestore
+      let user: User;
+      if (currentUser) {
+        user = currentUser;
+      } else {
+        const userDoc = await firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(userId)
+          .get();
+        user = { id: userId, ...userDoc.data() } as User;
+      }
 
       // Get landmark data if present
       let landmark: Landmark | undefined;
@@ -550,7 +554,7 @@ class PostsService {
             .doc(data.userId)
             .get();
 
-          const user = userDoc.data() as User;
+          const user = { id: data.userId, ...userDoc.data() } as User;
 
           // Get landmark data if present
           let landmark: Landmark | undefined;
@@ -607,8 +611,8 @@ class PostsService {
             .collection(COLLECTIONS.USERS)
             .doc(data.userId)
             .get();
-          
-          const user = userDoc.data() as User;
+
+          const user = { id: data.userId, ...userDoc.data() } as User;
 
           return {
             id: doc.id,
@@ -688,8 +692,8 @@ class PostsService {
         .collection(COLLECTIONS.USERS)
         .doc(userId)
         .get();
-      
-      const user = userDoc.data() as User;
+
+      const user = { id: userId, ...userDoc.data() } as User;
 
       return {
         id: docRef.id,
