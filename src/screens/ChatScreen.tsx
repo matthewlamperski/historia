@@ -7,25 +7,43 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
 } from 'react-native';
+import Video from 'react-native-video';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, MessageBubble, MessageInput, ActionSheet, ReportModal } from '../components/ui';
+import { Text, MessageBubble, MessageInput, ActionSheet, ReportModal, ImageViewerModal } from '../components/ui';
 import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useMessages, useMessageInput, useModeration, useToast } from '../hooks';
-import { RootStackScreenProps, CreateMessageData } from '../types';
+import { RootStackScreenProps, CreateMessageData, Conversation } from '../types';
 import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
-
-const MOCK_USER_ID = 'mock-user-id'; // TODO: Replace with actual user ID from auth store
+import { useHeaderHeight } from '@react-navigation/elements';
+import { messagingService } from '../services';
+import { useAuthStore } from '../store/authStore';
 
 export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
   route,
   navigation,
 }) => {
-  const { conversationId } = route.params;
+  const { conversationId, otherUserName, otherUserAvatar, otherUserUsername, otherUserId } = route.params;
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
+  const headerHeight = useHeaderHeight();
 
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+
+  // Load conversation metadata (type, name, participants)
+  useEffect(() => {
+    messagingService.getConversation(conversationId).then(conv => {
+      if (conv) setConversation(conv);
+    });
+  }, [conversationId]);
+
+  const isGroup = conversation?.type === 'group';
 
   const {
     messages,
@@ -33,18 +51,18 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
     error,
     hasMore,
     sendMessage,
-    sendMessageWithImages,
+    sendMessageWithMedia,
     loadMoreMessages,
     toggleLike,
     markAsRead,
-  } = useMessages(conversationId, MOCK_USER_ID);
+  } = useMessages(conversationId, currentUserId);
 
   const {
     text,
     setText,
-    selectedImages,
+    selectedMedia,
     pickImages,
-    removeImage,
+    removeMedia,
     sharedPost,
     setSharedPost,
     clearAll,
@@ -55,15 +73,76 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
   const { showToast } = useToast();
   const flatListRef = useRef<FlatList>(null);
 
-  // Get other user from messages
-  const otherUser =
-    messages.length > 0
-      ? messages.find(m => m.senderId !== MOCK_USER_ID)?.sender
-      : null;
+  // Get other user — prefer data from messages, fall back to nav params for new conversations
+  const otherUserFromMessages = messages.find(m => m.senderId !== currentUserId)?.sender ?? null;
+  const otherUser = otherUserFromMessages ?? (
+    otherUserName
+      ? { id: otherUserId ?? '', name: otherUserName, avatar: otherUserAvatar, username: otherUserUsername }
+      : null
+  );
 
-  const handleMorePress = () => {
+  const handleMorePress = useCallback(() => {
     setShowActionSheet(true);
-  };
+  }, []);
+
+  // Update native header whenever conversation / otherUser resolves
+  useEffect(() => {
+    navigation.setOptions({
+      headerTitle: () => {
+        if (isGroup) {
+          return (
+            <TouchableOpacity
+              onPress={() => (navigation as any).navigate('GroupInfo', { conversationId })}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.headerGroupAvatar}>
+                <FontAwesome6 name="users" size={16} color={theme.colors.primary[500]} iconStyle="solid" />
+              </View>
+              <View>
+                <Text variant="label" weight="semibold" numberOfLines={1}>
+                  {conversation?.name ?? 'Group'}
+                </Text>
+                <Text variant="caption" color="gray.500">
+                  {conversation?.participants.length ?? 0} members
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }
+        if (otherUser) {
+          return (
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ProfileView', { userId: otherUser.id })}
+              style={{ flexDirection: 'row', alignItems: 'center' }}
+              activeOpacity={0.7}
+            >
+              {otherUser.avatar ? (
+                <Image source={{ uri: otherUser.avatar }} style={styles.headerAvatar} />
+              ) : (
+                <View style={[styles.headerAvatar, styles.avatarPlaceholder]}>
+                  <Text style={styles.avatarText}>{otherUser.name.charAt(0).toUpperCase()}</Text>
+                </View>
+              )}
+              <Text variant="label" weight="semibold" numberOfLines={1}>
+                {otherUser.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        }
+        return null;
+      },
+      headerRight: (isGroup || otherUser) ? () => (
+        <TouchableOpacity
+          onPress={handleMorePress}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{ marginRight: 4 }}
+        >
+          <FontAwesome6 name="ellipsis-vertical" size={20} color={theme.colors.gray[600]} iconStyle="solid" />
+        </TouchableOpacity>
+      ) : undefined,
+    });
+  }, [conversation, otherUser, isGroup, conversationId, navigation, handleMorePress]);
 
   const handleBlockUser = useCallback(async () => {
     if (!otherUser) return;
@@ -91,6 +170,15 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
   }, [otherUser, blockUser, showToast, navigation]);
 
   const getActionSheetOptions = (): ActionSheetOption[] => {
+    if (isGroup) {
+      return [
+        {
+          label: 'Group Info',
+          icon: 'circle-info',
+          onPress: () => (navigation as any).navigate('GroupInfo', { conversationId }),
+        },
+      ];
+    }
     return [
       {
         label: 'Report User',
@@ -138,13 +226,18 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
         : undefined,
     };
 
+    const imageUris = selectedMedia.filter(m => m.type === 'image').map(m => m.uri);
+    const videoUris = selectedMedia.filter(m => m.type === 'video').map(m => m.uri);
+
+    // Clear input immediately — optimistic message already shows media in the chat
+    clearAll();
+
     try {
-      if (selectedImages.length > 0) {
-        await sendMessageWithImages(messageData, selectedImages);
+      if (imageUris.length > 0 || videoUris.length > 0) {
+        await sendMessageWithMedia(messageData, imageUris, videoUris);
       } else {
         await sendMessage(messageData);
       }
-      clearAll();
     } catch (err) {
       console.error('Error sending message:', err);
     }
@@ -153,15 +246,21 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
     conversationId,
     text,
     sharedPost,
-    selectedImages,
+    selectedMedia,
     sendMessage,
-    sendMessageWithImages,
+    sendMessageWithMedia,
     clearAll,
   ]);
 
-  const handleImagePress = useCallback((uri: string) => {
-    // TODO: Open image viewer
-    console.log('Open image:', uri);
+  const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
+  const [videoLightbox, setVideoLightbox] = useState<{ uri: string } | null>(null);
+
+  const handleImagePress = useCallback((images: string[], index: number) => {
+    setLightbox({ images, index });
+  }, []);
+
+  const handleVideoPress = useCallback((videos: string[], index: number) => {
+    setVideoLightbox({ uri: videos[index] });
   }, []);
 
   const handlePostPress = useCallback(
@@ -186,15 +285,17 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
       return (
         <MessageBubble
           message={item}
-          currentUserId={MOCK_USER_ID}
+          currentUserId={currentUserId}
           isConsecutive={isConsecutive}
           onLike={toggleLike}
           onImagePress={handleImagePress}
+          onVideoPress={handleVideoPress}
           onPostPress={handlePostPress}
+          showSenderName={isGroup}
         />
       );
     },
-    [messages, toggleLike, handleImagePress, handlePostPress]
+    [messages, toggleLike, handleImagePress, handleVideoPress, handlePostPress]
   );
 
   const renderHeader = () => {
@@ -228,72 +329,20 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
           Start the conversation
         </Text>
         <Text variant="body" color="gray.500" style={styles.emptyText}>
-          Send a message to begin chatting
+          {otherUser ? `Send ${otherUser.name} a message` : 'Send a message to begin chatting'}
         </Text>
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <FontAwesome6
-            name="chevron-left"
-            size={24}
-            color={theme.colors.gray[900]}
-            iconStyle="solid"
-          />
-        </TouchableOpacity>
-
-        {otherUser && (
-          <TouchableOpacity
-            onPress={() =>
-              navigation.navigate('ProfileView', { userId: otherUser.id })
-            }
-            style={styles.userInfo}
-            activeOpacity={0.7}
-          >
-            {otherUser.avatar ? (
-              <Image
-                source={{ uri: otherUser.avatar }}
-                style={styles.headerAvatar}
-              />
-            ) : (
-              <View style={[styles.headerAvatar, styles.avatarPlaceholder]}>
-                <Text style={styles.avatarText}>
-                  {otherUser.name.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
-            <Text variant="h4" style={styles.headerName}>
-              {otherUser.name}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {otherUser && (
-          <TouchableOpacity
-            onPress={handleMorePress}
-            style={styles.moreButton}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <FontAwesome6
-              name="ellipsis-vertical"
-              size={20}
-              color={theme.colors.gray[600]}
-              iconStyle="solid"
-            />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Messages list */}
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      {/* Messages list + input — KAV lifts both above keyboard */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={headerHeight}
+      >
       <View style={styles.content}>
         <FlatList
           ref={flatListRef}
@@ -318,15 +367,16 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
       <MessageInput
         text={text}
         onChangeText={setText}
-        selectedImages={selectedImages}
+        selectedMedia={selectedMedia}
         onPickImages={pickImages}
-        onRemoveImage={removeImage}
+        onRemoveMedia={removeMedia}
         sharedPost={sharedPost}
         onClearSharedPost={() => setSharedPost(null)}
         onSend={handleSend}
         canSend={canSend}
-        placeholder={`Message ${otherUser?.name || 'user'}...`}
+        placeholder={isGroup ? `Message ${conversation?.name ?? 'group'}...` : `Message ${otherUser?.name || 'user'}...`}
       />
+      </KeyboardAvoidingView>
 
       {/* Error message */}
       {error && (
@@ -357,6 +407,41 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
           }}
         />
       )}
+
+      {/* Image lightbox */}
+      {lightbox && (
+        <ImageViewerModal
+          visible={lightbox !== null}
+          images={lightbox.images}
+          initialIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+
+      {/* Video lightbox */}
+      {videoLightbox && (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setVideoLightbox(null)}
+        >
+          <View style={styles.videoLightboxContainer}>
+            <Video
+              source={{ uri: videoLightbox.uri }}
+              style={styles.videoLightboxPlayer}
+              resizeMode="contain"
+              controls
+            />
+            <TouchableOpacity
+              style={styles.videoLightboxClose}
+              onPress={() => setVideoLightbox(null)}
+            >
+              <FontAwesome6 name="xmark" size={20} color={theme.colors.white} iconStyle="solid" />
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -366,44 +451,32 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.white,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[200],
-  },
-  backButton: {
-    marginRight: theme.spacing.sm,
-    padding: theme.spacing.xs,
-  },
-  userInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: theme.spacing.sm,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: theme.spacing.xs,
   },
   avatarPlaceholder: {
     backgroundColor: theme.colors.primary[500],
     justifyContent: 'center',
     alignItems: 'center',
   },
+  headerGroupAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
+    marginRight: theme.spacing.xs,
+  },
   avatarText: {
     color: theme.colors.white,
-    fontSize: theme.fontSize.lg,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.bold,
-  },
-  headerName: {
-    flex: 1,
-  },
-  moreButton: {
-    padding: theme.spacing.xs,
   },
   content: {
     flex: 1,
@@ -430,6 +503,27 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+  videoLightboxContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoLightboxPlayer: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+  },
+  videoLightboxClose: {
+    position: 'absolute',
+    top: 48,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   errorContainer: {

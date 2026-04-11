@@ -6,20 +6,19 @@ import {
   Image,
   ScrollView,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Text } from './Text';
 import { Post } from '../../types';
+import { SelectedMedia } from '../../hooks/useImagePicker';
 import { theme } from '../../constants/theme';
 import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
 
 interface MessageInputProps {
   text: string;
   onChangeText: (text: string) => void;
-  selectedImages: string[];
+  selectedMedia: SelectedMedia[];
   onPickImages: () => void;
-  onRemoveImage: (index: number) => void;
+  onRemoveMedia: (index: number) => void;
   sharedPost?: Post | null;
   onClearSharedPost?: () => void;
   onSend: () => void;
@@ -31,9 +30,9 @@ interface MessageInputProps {
 export const MessageInput: React.FC<MessageInputProps> = ({
   text,
   onChangeText,
-  selectedImages,
+  selectedMedia,
   onPickImages,
-  onRemoveImage,
+  onRemoveMedia,
   sharedPost,
   onClearSharedPost,
   onSend,
@@ -42,11 +41,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   autoFocus = false,
 }) => {
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <View style={styles.container}>
+    <View style={styles.container}>
         {/* Shared post preview */}
         {sharedPost && (
           <View style={styles.sharedPostPreview}>
@@ -89,20 +84,30 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           </View>
         )}
 
-        {/* Image previews */}
-        {selectedImages.length > 0 && (
+        {/* Media previews (images + videos) */}
+        {selectedMedia.length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.imagePreviewScroll}
             contentContainerStyle={styles.imagePreviewContent}
           >
-            {selectedImages.map((uri, idx) => (
+            {selectedMedia.map((media, idx) => (
               <View key={idx} style={styles.imagePreviewWrapper}>
-                <Image source={{ uri }} style={styles.imagePreview} />
+                <Image source={{ uri: media.uri }} style={styles.imagePreview} />
+                {media.type === 'video' && (
+                  <View style={styles.videoOverlay}>
+                    <FontAwesome6
+                      name="play"
+                      size={16}
+                      color={theme.colors.white}
+                      iconStyle="solid"
+                    />
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.removeImageButton}
-                  onPress={() => onRemoveImage(idx)}
+                  onPress={() => onRemoveMedia(idx)}
                 >
                   <FontAwesome6
                     name="xmark"
@@ -161,7 +166,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({
           </TouchableOpacity>
         </View>
       </View>
-    </KeyboardAvoidingView>
   );
 };
 
@@ -224,6 +228,17 @@ const styles = StyleSheet.create({
   imagePreview: {
     width: 80,
     height: 80,
+    borderRadius: theme.borderRadius.md,
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     borderRadius: theme.borderRadius.md,
   },
   removeImageButton: {

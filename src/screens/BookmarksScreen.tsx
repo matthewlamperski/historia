@@ -8,13 +8,11 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
-  Platform,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 import { Text } from '../components/ui';
 import { theme } from '../constants/theme';
+import { openDirections } from '../utils';
 import { RootStackScreenProps, Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useLandmarks } from '../hooks/useLandmarks';
@@ -39,8 +37,6 @@ const CATEGORY_CONFIG: Record<
 };
 
 export const BookmarksScreen = () => {
-  const navigation = useNavigation<RootStackScreenProps<'Bookmarks'>['navigation']>();
-
   const { user, updateUser } = useAuthStore();
   const currentUserId = user?.id ?? '';
 
@@ -85,11 +81,7 @@ export const BookmarksScreen = () => {
   const handleBottomSheetBookmark = useCallback(async () => {
     if (!selectedLandmark) return;
     await unbookmarkLandmark(selectedLandmark.id);
-    updateUser({
-      bookmarkedLandmarks: (user?.bookmarkedLandmarks ?? []).filter(
-        id => id !== selectedLandmark.id
-      ),
-    });
+    updateUser({ bookmarkCount: Math.max(0, (user?.bookmarkCount ?? 1) - 1) });
     bottomSheetRef.current?.close();
     getBookmarkedLandmarks();
   }, [selectedLandmark, unbookmarkLandmark, user, updateUser, getBookmarkedLandmarks]);
@@ -132,32 +124,14 @@ export const BookmarksScreen = () => {
   const handleBottomSheetDirections = useCallback(() => {
     if (!selectedLandmark) return;
     const { latitude, longitude } = selectedLandmark.coordinates;
-    const label = encodeURIComponent(selectedLandmark.name);
-    const url = Platform.select({
-      ios: `maps://app?daddr=${latitude},${longitude}&q=${label}`,
-      android: `geo:0,0?q=${latitude},${longitude}(${label})`,
-    });
-    if (url) {
-      Linking.canOpenURL(url).then(supported => {
-        if (supported) {
-          Linking.openURL(url);
-        } else {
-          const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-          Linking.openURL(googleMapsUrl);
-        }
-      });
-    }
+    openDirections(latitude, longitude, selectedLandmark.name);
   }, [selectedLandmark]);
 
   // Unbookmark directly from card (without opening sheet)
   const handleUnbookmark = useCallback(
     async (landmarkId: string) => {
       await unbookmarkLandmark(landmarkId);
-      updateUser({
-        bookmarkedLandmarks: (user?.bookmarkedLandmarks ?? []).filter(
-          id => id !== landmarkId
-        ),
-      });
+      updateUser({ bookmarkCount: Math.max(0, (user?.bookmarkCount ?? 1) - 1) });
       getBookmarkedLandmarks();
     },
     [unbookmarkLandmark, user, updateUser, getBookmarkedLandmarks]
@@ -268,7 +242,7 @@ export const BookmarksScreen = () => {
 
   if (!user) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['bottom']}>
         <ActivityIndicator
           size="large"
           color={theme.colors.primary[500]}
@@ -279,30 +253,7 @@ export const BookmarksScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Icon name="chevron-left" size={22} color={theme.colors.gray[900]} />
-        </TouchableOpacity>
-
-        <Text variant="h4" weight="semibold" style={styles.headerTitle}>
-          Saved Landmarks
-        </Text>
-
-        {landmarks.length > 0 && (
-          <View style={styles.countBadge}>
-            <Text variant="caption" weight="bold" style={styles.countText}>
-              {landmarks.length}
-            </Text>
-          </View>
-        )}
-      </View>
-
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* Free-tier limit banner */}
       {!isPremium && landmarks.length >= FREE_BOOKMARK_LIMIT && (
         <TouchableOpacity
@@ -314,7 +265,7 @@ export const BookmarksScreen = () => {
           <Text variant="caption" style={styles.limitText}>
             You've reached the 10-bookmark free limit.{' '}
             <Text variant="caption" weight="bold" style={styles.limitUpgrade}>
-              Upgrade to Premium
+              Upgrade to Pro
             </Text>{' '}
             for unlimited saves.
           </Text>
@@ -364,6 +315,8 @@ export const BookmarksScreen = () => {
             onBookmark={handleBottomSheetBookmark}
             onVisit={handleBottomSheetVisit}
             onDirections={handleBottomSheetDirections}
+            onSaveOffline={() => {}}
+            isOfflineSaved={false}
           />
         )}
       </BottomSheet>
@@ -375,35 +328,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
-  },
-
-  // ── Header ──────────────────────────────────────────────────────────────────
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[100],
-  },
-  backBtn: {
-    marginRight: theme.spacing.sm,
-  },
-  headerTitle: {
-    flex: 1,
-    color: theme.colors.gray[900],
-  },
-  countBadge: {
-    backgroundColor: theme.colors.primary[100],
-    borderRadius: theme.borderRadius.full,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 2,
-    minWidth: 28,
-    alignItems: 'center',
-  },
-  countText: {
-    color: theme.colors.primary[700],
-    fontSize: theme.fontSize.xs,
   },
 
   // ── Limit banner ────────────────────────────────────────────────────────────

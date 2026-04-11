@@ -1,68 +1,14 @@
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
+import storage, { StringFormat } from '@react-native-firebase/storage';
 import { COLLECTIONS } from './firebaseConfig';
 import { User } from '../types';
 
 class UserService {
-  // Get or create a mock user for demonstration
-  async getMockUser(): Promise<User> {
-    const mockUserId = 'mock-user-id';
-    
-    try {
-      const userDoc = await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(mockUserId)
-        .get();
-
-      if (userDoc.exists()) {
-        return userDoc.data() as User;
-      } else {
-        // Create a mock user
-        const mockUser: Omit<User, 'id'> = {
-          name: 'Demo User',
-          username: 'demo_user',
-          email: 'demo@historia.app',
-          avatar: undefined,
-          followerCount: 0,
-          followingCount: 0,
-          postCount: 0,
-          isVerified: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-
-        await firestore()
-          .collection(COLLECTIONS.USERS)
-          .doc(mockUserId)
-          .set(mockUser);
-
-        return {
-          id: mockUserId,
-          ...mockUser,
-        };
-      }
-    } catch (error) {
-      console.error('Error getting mock user:', error);
-      // Return a fallback user if Firebase fails
-      return {
-        id: mockUserId,
-        name: 'Demo User',
-        username: 'demo_user',
-        email: 'demo@historia.app',
-        followerCount: 0,
-        followingCount: 0,
-        postCount: 0,
-        isVerified: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-  }
-
   // Create or update user
-  async createOrUpdateUser(userData: Partial<User>): Promise<User> {
+  async createOrUpdateUser(userData: Partial<User> & { id: string }): Promise<User> {
     try {
-      const userId = userData.id || 'mock-user-id';
+      const { id: userId } = userData;
       const now = new Date().toISOString();
       
       const userRef = firestore().collection(COLLECTIONS.USERS).doc(userId);
@@ -80,8 +26,6 @@ class UserService {
       } else {
         // Create new user
         const newUser = {
-          name: 'Demo User',
-          email: 'demo@historia.app',
           ...userData,
           id: userId,
           createdAt: now,
@@ -97,10 +41,42 @@ class UserService {
     }
   }
 
+  // Update the user's hometown (location they call home on the map)
+  async updateHometown(
+    userId: string,
+    hometown: { latitude: number; longitude: number; city: string }
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await firestore()
+      .collection(COLLECTIONS.USERS)
+      .doc(userId)
+      .set({ hometown, updatedAt: now }, { merge: true });
+  }
+
+  // Upload avatar image to Firebase Storage, returns remote download URL.
+  // Always writes to avatars/{userId}.jpg so old avatars are automatically replaced.
+  // Accepts an optional base64 string (preferred — avoids iOS temp-file issues).
+  async uploadAvatar(userId: string, localUri: string, base64?: string | null): Promise<string> {
+    const reference = storage().ref(`avatars/${userId}.jpg`);
+
+    if (base64) {
+      // Upload via base64 string — most reliable on iOS (no temp-file path issues)
+      await reference.putString(base64, StringFormat.BASE64, {
+        contentType: 'image/jpeg',
+      });
+    } else {
+      // Fallback: upload directly from file URI
+      const filePath = localUri.replace(/^file:\/\//, '');
+      await reference.putFile(filePath);
+    }
+
+    return reference.getDownloadURL();
+  }
+
   // Update profile fields for the currently signed-in user
   async updateUserProfile(
     userId: string,
-    updates: Pick<Partial<User>, 'name' | 'bio' | 'location' | 'website' | 'avatar'>
+    updates: Pick<Partial<User>, 'name' | 'bio' | 'location' | 'website' | 'avatar' | 'username'>
   ): Promise<void> {
     const now = new Date().toISOString();
 

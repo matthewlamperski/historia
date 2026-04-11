@@ -1,21 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
   Modal,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   Image,
   TouchableOpacity,
   Alert,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, Button, Input } from '../ui';
 import { theme } from '../../constants/theme';
 import { useImagePicker } from '../../hooks';
 import { CreatePostData } from '../../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import { LocationPickerModal, PickedLocation } from './LocationPickerModal';
+import { LandmarkPickerModal, PickedLandmark } from './LandmarkPickerModal';
 
 interface CreatePostModalProps {
   visible: boolean;
@@ -30,16 +32,33 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   onSubmit,
   loading: _loading = false,
 }) => {
+  const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [includeLocation, setIncludeLocation] = useState(false);
-  
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [locationData, setLocationData] = useState<PickedLocation | null>(null);
+  const [landmarkPickerVisible, setLandmarkPickerVisible] = useState(false);
+  const [landmarkData, setLandmarkData] = useState<PickedLandmark | null>(null);
+
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      e => setKeyboardHeight(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0),
+    );
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
   const {
-    selectedImages,
+    selectedMedia,
     uploading,
     pickImages,
-    uploadImages,
-    removeImage,
+    uploadMedia,
+    removeMedia,
     clearImages,
   } = useImagePicker();
 
@@ -68,41 +87,39 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
 
   const resetForm = () => {
     setContent('');
-    setIncludeLocation(false);
+    setLocationData(null);
+    setLandmarkData(null);
     clearImages();
     setSubmitting(false);
   };
 
   const handleSubmit = async () => {
-    if (!content.trim() && selectedImages.length === 0) {
-      Alert.alert('Empty Post', 'Please add some content or images to your post.');
+    if (!content.trim() && selectedMedia.length === 0) {
+      Alert.alert('Empty Post', 'Please add some content or media to your post.');
       return;
     }
 
     try {
       setSubmitting(true);
-      
-      // Upload images if any
+
       let imageUrls: string[] = [];
-      if (selectedImages.length > 0) {
-        imageUrls = await uploadImages(selectedImages);
+      let videoUrls: string[] = [];
+      if (selectedMedia.length > 0) {
+        const result = await uploadMedia();
+        imageUrls = result.imageUrls;
+        videoUrls = result.videoUrls;
       }
 
-      // Get location if enabled (mock for now)
-      let location;
-      if (includeLocation) {
-        // In a real app, you'd use geolocation here
-        location = {
-          latitude: 37.7749,
-          longitude: -122.4194,
-          address: 'San Francisco, CA',
-        };
-      }
+      const location = locationData
+        ? { latitude: locationData.latitude, longitude: locationData.longitude, city: locationData.city }
+        : undefined;
 
       const postData: CreatePostData = {
         content: content.trim(),
         images: imageUrls,
+        videos: videoUrls,
         location,
+        landmarkId: landmarkData?.id,
       };
 
       await onSubmit(postData);
@@ -115,7 +132,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
     }
   };
 
-  const canSubmit = (content.trim() || selectedImages.length > 0) && !submitting && !uploading;
+  const canSubmit = (content.trim() || selectedMedia.length > 0) && !submitting && !uploading;
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -138,17 +155,22 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
   );
 
   const renderSelectedImages = () => {
-    if (selectedImages.length === 0) return null;
+    if (selectedMedia.length === 0) return null;
 
     return (
       <View style={styles.imagesContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {selectedImages.map((uri: string, index: number) => (
+          {selectedMedia.map((item, index) => (
             <View key={index} style={styles.imageWrapper}>
-              <Image source={{ uri }} style={styles.selectedImage} />
+              <Image source={{ uri: item.uri }} style={styles.selectedImage} />
+              {item.type === 'video' && (
+                <View style={styles.videoOverlay}>
+                  <Icon name="play" size={18} color={theme.colors.white} />
+                </View>
+              )}
               <TouchableOpacity
                 style={styles.removeImageButton}
-                onPress={() => removeImage(index)}
+                onPress={() => removeMedia(index)}
               >
                 <Icon name="xmark" size={14} color={theme.colors.white} />
               </TouchableOpacity>
@@ -170,19 +192,37 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
 
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() => setIncludeLocation(!includeLocation)}
+        onPress={() => setLocationPickerVisible(true)}
       >
         <Icon
           name="location-dot"
           size={20}
-          color={includeLocation ? theme.colors.primary[500] : theme.colors.gray[500]}
+          color={locationData ? theme.colors.primary[500] : theme.colors.gray[500]}
         />
         <Text
           variant="label"
-          color={includeLocation ? 'primary.500' : 'gray.500'}
+          color={locationData ? 'primary.500' : 'gray.500'}
           style={styles.actionText}
         >
           Location
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.actionButton}
+        onPress={() => setLandmarkPickerVisible(true)}
+      >
+        <Icon
+          name="landmark"
+          size={20}
+          color={landmarkData ? theme.colors.primary[500] : theme.colors.gray[500]}
+        />
+        <Text
+          variant="label"
+          color={landmarkData ? 'primary.500' : 'gray.500'}
+          style={styles.actionText}
+        >
+          Landmark
         </Text>
       </TouchableOpacity>
     </View>
@@ -195,14 +235,11 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
       presentationStyle="pageSheet"
       onRequestClose={handleClose}
     >
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         {renderHeader()}
-        
-        <KeyboardAvoidingView
-          style={styles.content}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+
+        <View style={[styles.content, { paddingBottom: keyboardHeight || insets.bottom }]}>
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <View style={styles.inputContainer}>
               <Input
                 placeholder="What's on your mind?"
@@ -214,23 +251,62 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
                 style={styles.textInput}
                 variant="filled"
               />
-              
-              {includeLocation && (
-                <View style={styles.locationTag}>
+
+              {locationData && (
+                <TouchableOpacity style={styles.tag} onPress={() => setLocationPickerVisible(true)}>
                   <Icon name="location-dot" size={14} color={theme.colors.primary[500]} />
-                  <Text variant="caption" color="primary.500" style={styles.locationText}>
-                    San Francisco, CA
+                  <Text variant="label" color="primary.700" style={styles.tagLabel} numberOfLines={1}>
+                    {locationData.city}
                   </Text>
-                </View>
+                  <TouchableOpacity
+                    onPress={() => setLocationData(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Icon name="xmark" size={12} color={theme.colors.primary[400]} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              )}
+
+              {landmarkData && (
+                <TouchableOpacity style={styles.tag} onPress={() => setLandmarkPickerVisible(true)}>
+                  <Icon name="landmark" size={14} color={theme.colors.primary[500]} />
+                  <Text variant="label" color="primary.700" style={styles.tagLabel} numberOfLines={1}>
+                    {landmarkData.name}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setLandmarkData(null)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Icon name="xmark" size={12} color={theme.colors.primary[400]} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
               )}
             </View>
-
-            {renderSelectedImages()}
           </ScrollView>
-          
+
+          {renderSelectedImages()}
           {renderActions()}
-        </KeyboardAvoidingView>
+        </View>
       </SafeAreaView>
+
+      <LocationPickerModal
+        visible={locationPickerVisible}
+        initialLocation={locationData ?? undefined}
+        onConfirm={loc => {
+          setLocationData(loc);
+          setLocationPickerVisible(false);
+        }}
+        onCancel={() => setLocationPickerVisible(false)}
+      />
+
+      <LandmarkPickerModal
+        visible={landmarkPickerVisible}
+        onConfirm={lm => {
+          setLandmarkData(lm);
+          setLandmarkPickerVisible(false);
+        }}
+        onCancel={() => setLandmarkPickerVisible(false)}
+      />
     </Modal>
   );
 };
@@ -263,18 +339,23 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
   },
-  locationTag: {
+  tag: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
     backgroundColor: theme.colors.primary[50],
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
     paddingHorizontal: theme.spacing.sm,
     paddingVertical: theme.spacing.xs,
     borderRadius: theme.borderRadius.full,
-    alignSelf: 'flex-start',
     marginTop: theme.spacing.sm,
+    gap: 4,
+    maxWidth: '70%',
   },
-  locationText: {
-    marginLeft: theme.spacing.xs,
+  tagLabel: {
+    fontSize: theme.fontSize.sm,
+    flexShrink: 1,
   },
   imagesContainer: {
     paddingHorizontal: theme.spacing.lg,
@@ -289,13 +370,24 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: theme.borderRadius.md,
   },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: theme.borderRadius.md,
+  },
   removeImageButton: {
     position: 'absolute',
-    top: -5,
-    right: -5,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 5,
+    right: 5,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: theme.colors.error[500],
     justifyContent: 'center',
     alignItems: 'center',

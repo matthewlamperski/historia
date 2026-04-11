@@ -15,6 +15,7 @@ import { theme } from '../../constants/theme';
 import { useComments } from '../../hooks';
 import { Comment as CommentType } from '../../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import { useAuthStore } from '../../store/authStore';
 
 interface CommentsModalProps {
   visible: boolean;
@@ -27,9 +28,11 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   postId,
   onClose,
 }) => {
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  
+
   const {
     comments,
     loading,
@@ -61,7 +64,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   };
 
   const renderComment = ({ item }: { item: CommentType }) => (
-    <Comment comment={item} />
+    <Comment comment={item} currentUserId={currentUserId} />
   );
 
   const renderHeader = () => (

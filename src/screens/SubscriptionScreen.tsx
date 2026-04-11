@@ -79,7 +79,7 @@ const PREMIUM_FEATURES: FeatureRowProps[] = [
   {
     icon: 'bookmark',
     title: 'Unlimited Bookmarks',
-    description: `Save as many sites as you want`,
+    description: `Free accounts are limited to ${FREE_BOOKMARK_LIMIT} saved sites — go unlimited with Pro`,
     highlight: false,
   },
   {
@@ -103,7 +103,7 @@ const PREMIUM_FEATURES: FeatureRowProps[] = [
 ];
 
 export const SubscriptionScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const { user } = useAuthStore();
   const {
     subscribe,
@@ -119,6 +119,26 @@ export const SubscriptionScreen: React.FC = () => {
   // Entrance animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
+
+  useEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={{
+            marginLeft: 4,
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <FontAwesome6 name="xmark" size={16} color={theme.colors.gray[500]} iconStyle="solid" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
 
   useEffect(() => {
     Animated.parallel([
@@ -170,21 +190,7 @@ export const SubscriptionScreen: React.FC = () => {
     (availableProducts[0] as any)?.localizedPrice ?? '$1.99';
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      {/* Close Button */}
-      <TouchableOpacity
-        style={styles.closeButton}
-        onPress={() => navigation.goBack()}
-        hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
-      >
-        <FontAwesome6
-          name="xmark"
-          size={20}
-          color={theme.colors.gray[500]}
-          iconStyle="solid"
-        />
-      </TouchableOpacity>
-
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -213,7 +219,7 @@ export const SubscriptionScreen: React.FC = () => {
 
           {/* Headlines */}
           <Text variant="h2" weight="bold" style={styles.heroTitle}>
-            Historia Premium
+            Historia Pro
           </Text>
           <Text variant="body" color="gray.600" style={styles.heroSubtitle}>
             Turn every adventure into real rewards.{'\n'}
@@ -229,7 +235,7 @@ export const SubscriptionScreen: React.FC = () => {
               iconStyle="solid"
             />
             <Text variant="label" weight="semibold" style={styles.trialBadgeText}>
-              30-Day Free Trial Included
+              14-Day Free Trial Included
             </Text>
           </View>
 
@@ -244,7 +250,7 @@ export const SubscriptionScreen: React.FC = () => {
               </Text>
             </View>
             <Text variant="caption" color="gray.500" style={styles.priceNote}>
-              after your free 30-day trial
+              after your free 14-day trial
             </Text>
           </View>
         </Animated.View>
@@ -323,7 +329,7 @@ export const SubscriptionScreen: React.FC = () => {
                   style={styles.ctaIcon}
                 />
                 <Text variant="label" weight="bold" style={styles.ctaButtonText}>
-                  Start Free 30-Day Trial
+                  Start Free 14-Day Trial
                 </Text>
               </>
             )}
@@ -349,7 +355,7 @@ export const SubscriptionScreen: React.FC = () => {
 
           {/* Legal fine print */}
           <Text variant="caption" color="gray.400" style={styles.legalText}>
-            {priceString}/month after 30-day free trial. Cancel anytime in{' '}
+            {priceString}/month after 14-day free trial. Cancel anytime in{' '}
             {'\n'}Settings {'>'} Subscriptions. Subscription renews automatically.
           </Text>
 
@@ -373,18 +379,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 52,
-    right: theme.spacing.lg,
-    zIndex: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.gray[100],
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   scrollContent: {
     paddingBottom: theme.spacing['2xl'],

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,25 +10,30 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button, Post } from '../components/ui';
+import { ChallengeCoin } from '../components/ui/ChallengeCoin';
 import { theme } from '../constants/theme';
 import { useNavigation } from '@react-navigation/native';
 import { RootStackScreenProps, Post as PostType } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
-import { useVisits, useSubscription } from '../hooks';
+import { useVisits, useSubscription, useNotifications, useFCMToken, useReferral, useUserPosts, useCompanions } from '../hooks';
 import { useAuthStore } from '../store/authStore';
-
-// TODO: Replace with usePosts(currentUserId) when posts feed is wired to Firebase
-const USER_POSTS: PostType[] = [];
+import { getLevelForPoints, getNextLevel } from '../constants/levels';
 
 const ProfileTab = () => {
   const navigation = useNavigation<RootStackScreenProps<'Main'>['navigation']>();
-  const [posts] = useState<PostType[]>(USER_POSTS);
 
   const { user } = useAuthStore();
   const currentUserId = user?.id ?? '';
+  const [avatarError, setAvatarError] = useState(false);
+
+  const { posts, removePost } = useUserPosts(currentUserId);
+  const { companions } = useCompanions(currentUserId, !!currentUserId);
 
   const { visits } = useVisits(currentUserId, !!currentUserId);
   const { isPremium, isOnTrial, showSubscriptionScreen } = useSubscription();
+  const { unreadCount } = useNotifications(currentUserId);
+  useFCMToken(currentUserId);
+  const { referralCode, referralCount, isSharing, shareReferralLink } = useReferral();
 
   const handleEditProfile = useCallback(() => {
     navigation.navigate('EditProfile');
@@ -60,12 +65,14 @@ const ProfileTab = () => {
     >
       <Post
         post={item}
+        currentUserId={currentUserId}
         onComment={handleComment}
         onShare={handleShare}
         onUserPress={handleUserPress}
+        onDelete={removePost}
       />
     </TouchableOpacity>
-  ), [handleComment, handleShare, handleUserPress, navigation]);
+  ), [handleComment, handleShare, handleUserPress, navigation, currentUserId, removePost]);
 
   if (!user) {
     return (
@@ -79,16 +86,36 @@ const ProfileTab = () => {
 
   const renderHeader = () => (
     <View style={styles.profileContent}>
+      {/* Top action bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Notifications')}
+          style={styles.bellButton}
+          accessibilityLabel="Notifications"
+        >
+          <Icon name="bell" size={20} color={theme.colors.gray[700]} />
+          {unreadCount > 0 && (
+            <View style={styles.bellBadge}>
+              <Text variant="caption" weight="bold" style={styles.bellBadgeText}>
+                {unreadCount > 9 ? '9+' : String(unreadCount)}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Profile Header */}
       <View style={styles.profileHeader}>
         <TouchableOpacity onPress={handleEditProfile} style={styles.avatarContainer}>
-          {user.avatar ? (
-            <Image source={{ uri: user.avatar }} style={styles.avatar} />
+          {user.avatar && !avatarError ? (
+            <Image
+              source={{ uri: user.avatar }}
+              style={styles.avatar}
+              onError={() => setAvatarError(true)}
+            />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Text variant="h2" color="white" weight="bold">
-                {(user.name ?? '').split(' ').map(n => n[0]).filter(Boolean).join('') || '?'}
-              </Text>
+              <Icon name="user" size={36} color={theme.colors.white} />
             </View>
           )}
           <View style={styles.avatarEditIcon}>
@@ -105,6 +132,11 @@ const ProfileTab = () => {
               <Icon name="badge-check" size={20} color={theme.colors.primary[500]} />
             )}
           </View>
+          {user.username ? (
+            <Text variant="caption" color="gray.500" style={styles.handleText}>
+              @{user.username}
+            </Text>
+          ) : null}
           {user.location ? (
             <View style={styles.locationRow}>
               <Icon name="location-dot" size={14} color={theme.colors.gray[500]} />
@@ -133,6 +165,36 @@ const ProfileTab = () => {
         ) : null}
       </View>
 
+      {/* Social Stats — private, visible only to self */}
+      <View style={styles.statsRow}>
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() => navigation.navigate('CompanionsList', { userId: currentUserId })}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.statNumber}>{companions.length}</Text>
+          <Text style={styles.statLabel}>Companions</Text>
+        </TouchableOpacity>
+        <View style={styles.statDivider} />
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() => navigation.navigate('FollowList', { userId: currentUserId, mode: 'following' })}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.statNumber}>{user.followingCount ?? 0}</Text>
+          <Text style={styles.statLabel}>Following</Text>
+        </TouchableOpacity>
+        <View style={styles.statDivider} />
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() => navigation.navigate('FollowList', { userId: currentUserId, mode: 'followers' })}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.statNumber}>{user.followerCount ?? 0}</Text>
+          <Text style={styles.statLabel}>Followers</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Action Buttons */}
       <View style={styles.actions}>
         <Button
@@ -151,30 +213,48 @@ const ProfileTab = () => {
         </Button>
       </View>
 
-      {/* Points & Rewards Section */}
-      {isPremium ? (
-        <View style={styles.pointsCard}>
-          <View style={styles.pointsCardHeader}>
-            <Icon name="star" size={16} color={theme.colors.warning[500]} solid />
-            <Text variant="label" weight="semibold" style={styles.pointsCardTitle}>
-              Your Points
-            </Text>
-            {isOnTrial && (
-              <View style={styles.trialChip}>
-                <Text variant="caption" weight="medium" style={styles.trialChipText}>
-                  Trial
+      {/* Points & Level Card — shown for all users */}
+      {(() => {
+        const pts = user.pointsBalance ?? 0;
+        const level = getLevelForPoints(pts);
+        const next = getNextLevel(level);
+        const ptsToNext = next ? next.minPoints - pts : null;
+        return (
+          <TouchableOpacity
+            style={[styles.pointsCard, { borderColor: level.color }]}
+            onPress={() => navigation.navigate('Levels', { userId: currentUserId })}
+            activeOpacity={0.85}
+          >
+            <ChallengeCoin level={level} size="lg" />
+            <View style={styles.pointsCardInfo}>
+              <View style={styles.pointsCardHeader}>
+                <Text variant="label" weight="semibold" style={[styles.pointsLevelName, { color: level.color }]}>
+                  {level.name}
                 </Text>
+                {isOnTrial && (
+                  <View style={styles.trialChip}>
+                    <Text variant="caption" weight="medium" style={styles.trialChipText}>
+                      Trial
+                    </Text>
+                  </View>
+                )}
               </View>
-            )}
-          </View>
-          <Text variant="h3" weight="bold" style={styles.pointsBalance}>
-            {(user.pointsBalance ?? 0).toLocaleString()} pts
-          </Text>
-          <Text variant="caption" color="gray.500">
-            Earn +10 pts per visit · +2 pts per post
-          </Text>
-        </View>
-      ) : (
+              <Text variant="h3" weight="bold" style={styles.pointsBalance}>
+                {pts.toLocaleString()} pts
+              </Text>
+              <Text variant="caption" color="gray.500">
+                {ptsToNext !== null
+                  ? `${ptsToNext.toLocaleString()} pts to ${next!.name}`
+                  : 'Maximum level reached 🏆'}
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={14} color={theme.colors.gray[400]} />
+          </TouchableOpacity>
+        );
+      })()}
+
+      {/* Premium promo — still shown for free users */}
+      {!isPremium && (
         <TouchableOpacity
           style={styles.premiumPromoCard}
           onPress={showSubscriptionScreen}
@@ -184,12 +264,12 @@ const ProfileTab = () => {
             <View style={styles.premiumPromoIcon}>
               <Icon name="crown" size={20} color={theme.colors.primary[500]} solid />
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text variant="label" weight="semibold" style={styles.premiumPromoTitle}>
-                Unlock Points & Badges
+                Upgrade to Historia Pro
               </Text>
               <Text variant="caption" color="gray.500" style={styles.premiumPromoSub}>
-                Earn rewards on every visit · Redeem for gear
+                Offline maps · Exclusive badges · More features
               </Text>
             </View>
           </View>
@@ -201,6 +281,52 @@ const ProfileTab = () => {
           </View>
         </TouchableOpacity>
       )}
+
+      {/* Refer a Friend Card */}
+      {referralCode ? (
+        <View style={styles.referralCard}>
+          <View style={styles.referralCardTop}>
+            <View style={styles.referralIcon}>
+              <Icon name="gift" size={18} color={theme.colors.primary[500]} solid />
+            </View>
+            <View style={styles.referralCardText}>
+              <Text variant="label" weight="semibold" style={styles.referralCardTitle}>
+                Refer a Friend
+              </Text>
+              <Text variant="caption" color="gray.500">
+                You &amp; a friend each get 20 bonus points
+              </Text>
+              {referralCount > 0 && (
+                <Text variant="caption" color="primary.600" weight="medium" style={styles.referralCount}>
+                  {referralCount} friend{referralCount !== 1 ? 's' : ''} referred
+                </Text>
+              )}
+            </View>
+          </View>
+          <View style={styles.referralCardBottom}>
+            <View style={styles.referralCodeBadge}>
+              <Text variant="caption" weight="bold" style={styles.referralCodeText}>
+                {referralCode}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.shareButton, isSharing && styles.shareButtonDisabled]}
+              onPress={shareReferralLink}
+              disabled={isSharing}
+              activeOpacity={0.8}
+            >
+              {isSharing ? (
+                <Icon name="spinner" size={13} color={theme.colors.white} />
+              ) : (
+                <Icon name="arrow-up-from-bracket" size={13} color={theme.colors.white} />
+              )}
+              <Text variant="caption" weight="semibold" style={styles.shareButtonText}>
+                {isSharing ? 'Creating link…' : 'Share Link'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       {/* Visited Landmarks Section */}
       {visits.length > 0 && (
@@ -253,7 +379,7 @@ const ProfileTab = () => {
           </Text>
           <View style={styles.bookmarksCount}>
             <Text variant="caption" weight="bold" style={styles.bookmarksCountText}>
-              {user.bookmarkedLandmarks?.length ?? 0}
+              {user.bookmarkCount ?? 0}
             </Text>
           </View>
         </View>
@@ -298,6 +424,38 @@ const styles = StyleSheet.create({
   profileContent: {
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.lg,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: theme.spacing.md,
+  },
+  bellButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.gray[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#0A3161',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: theme.colors.white,
+  },
+  bellBadgeText: {
+    color: theme.colors.white,
+    fontSize: 9,
+    lineHeight: 12,
   },
   profileHeader: {
     flexDirection: 'row',
@@ -350,6 +508,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: theme.spacing.xs,
   },
+  handleText: {
+    marginTop: 2,
+  },
   locationText: {
     marginLeft: theme.spacing.xs,
   },
@@ -367,6 +528,34 @@ const styles = StyleSheet.create({
   websiteText: {
     marginLeft: theme.spacing.xs,
   },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.xl,
+    paddingVertical: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statNumber: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.gray[900],
+  },
+  statLabel: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.gray[500],
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: theme.colors.primary[200],
+  },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -374,9 +563,6 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.lg,
     paddingVertical: theme.spacing.lg,
     marginBottom: theme.spacing.lg,
-  },
-  statItem: {
-    alignItems: 'center',
   },
   actions: {
     flexDirection: 'row',
@@ -386,21 +572,28 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
   },
-  // Points card (premium users)
+  // Points card
   pointsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
     backgroundColor: theme.colors.primary[50],
     borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.sm,
     marginBottom: theme.spacing.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
+    borderWidth: 1.5,
+  },
+  pointsCardInfo: {
+    flex: 1,
   },
   pointsCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
+    marginBottom: 2,
   },
+  pointsLevelName: {},
   pointsCardTitle: {
     color: theme.colors.primary[800],
   },
@@ -466,6 +659,75 @@ const styles = StyleSheet.create({
   premiumPromoCtaText: {
     color: theme.colors.white,
     fontSize: theme.fontSize.xs,
+  },
+  // Refer a Friend card
+  referralCard: {
+    backgroundColor: theme.colors.white,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary[100],
+    ...theme.shadows.sm,
+  },
+  referralCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  referralIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  referralCardText: {
+    flex: 1,
+  },
+  referralCardTitle: {
+    color: theme.colors.gray[800],
+    marginBottom: 2,
+  },
+  referralCount: {
+    marginTop: 2,
+  },
+  referralCardBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  referralCodeBadge: {
+    flex: 1,
+    backgroundColor: theme.colors.gray[100],
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.gray[200],
+  },
+  referralCodeText: {
+    color: theme.colors.gray[800],
+    letterSpacing: 2,
+    fontSize: 14,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary[500],
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    gap: theme.spacing.xs,
+  },
+  shareButtonDisabled: {
+    opacity: 0.6,
+  },
+  shareButtonText: {
+    color: theme.colors.white,
   },
   visitsSection: {
     marginBottom: theme.spacing.xl,

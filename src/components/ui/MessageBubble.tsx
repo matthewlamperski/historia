@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
+import Video from 'react-native-video';
 import { Text } from './Text';
 import { ActionSheet } from './ActionSheet';
 import { ReportModal } from './ReportModal';
@@ -20,8 +21,10 @@ interface MessageBubbleProps {
   currentUserId: string;
   isConsecutive: boolean;
   onLike: (messageId: string) => void;
-  onImagePress?: (imageUri: string) => void;
+  onImagePress?: (images: string[], index: number) => void;
+  onVideoPress?: (videos: string[], index: number) => void;
   onPostPress?: (postId: string) => void;
+  showSenderName?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -30,7 +33,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   isConsecutive,
   onLike,
   onImagePress,
+  onVideoPress,
   onPostPress,
+  showSenderName = false,
 }) => {
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -90,6 +95,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
       {/* Message content */}
       <View style={styles.messageContent}>
+        {/* Sender name for group chats */}
+        {showSenderName && !isSender && !isConsecutive && (
+          <Text variant="caption" weight="semibold" style={styles.senderName}>
+            {message.sender.name}
+          </Text>
+        )}
+
         {/* Message bubble */}
         <View
           style={[
@@ -122,7 +134,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 {message.images.map((uri, idx) => (
                   <TouchableOpacity
                     key={idx}
-                    onPress={() => onImagePress?.(uri)}
+                    onPress={() => onImagePress?.(message.images, idx)}
                     activeOpacity={0.8}
                   >
                     <Image
@@ -132,6 +144,41 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         idx > 0 && styles.messageImageSpacing,
                       ]}
                     />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Videos */}
+          {(message.videos ?? []).length > 0 && (
+            <View style={styles.imagesContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.imagesScroll}
+              >
+                {(message.videos ?? []).map((uri, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => onVideoPress?.(message.videos!, idx)}
+                    activeOpacity={0.8}
+                    style={[styles.videoWrapper, idx > 0 && styles.messageImageSpacing]}
+                  >
+                    <Video
+                      source={{ uri }}
+                      style={styles.messageImage}
+                      paused
+                      resizeMode="cover"
+                    />
+                    <View style={styles.videoPlayOverlay}>
+                      <FontAwesome6
+                        name="play"
+                        size={20}
+                        color={theme.colors.white}
+                        iconStyle="solid"
+                      />
+                    </View>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -273,6 +320,11 @@ const styles = StyleSheet.create({
   messageContent: {
     maxWidth: '75%',
   },
+  senderName: {
+    color: theme.colors.primary[600],
+    marginBottom: 2,
+    marginLeft: theme.spacing.xs,
+  },
   bubble: {
     borderRadius: theme.borderRadius.xl,
     paddingHorizontal: theme.spacing.md,
@@ -318,6 +370,20 @@ const styles = StyleSheet.create({
   },
   messageImageSpacing: {
     marginLeft: theme.spacing.sm,
+  },
+  videoWrapper: {
+    position: 'relative',
+  },
+  videoPlayOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: theme.borderRadius.lg,
   },
   postPreview: {
     marginTop: theme.spacing.sm,

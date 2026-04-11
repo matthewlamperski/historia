@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, CompanionRequest } from '../types';
-import { companionsService } from '../services';
+import { companionsService, RelationshipStatus } from '../services/companionsService';
 import { useToast } from './useToast';
 
 export interface UseCompanionsReturn {
@@ -9,15 +9,18 @@ export interface UseCompanionsReturn {
   loading: boolean;
   error: string | null;
   sendRequest: (receiverId: string) => Promise<void>;
+  cancelRequest: (receiverId: string) => Promise<void>;
   acceptRequest: (requestId: string) => Promise<void>;
   rejectRequest: (requestId: string) => Promise<void>;
   removeCompanion: (companionId: string) => Promise<void>;
+  getRelationshipStatus: (targetUserId: string) => Promise<RelationshipStatus>;
+  getReceivedRequestId: (senderId: string) => Promise<string | null>;
   refreshCompanions: () => Promise<void>;
 }
 
 export const useCompanions = (
   userId: string,
-  initialLoad: boolean = true
+  _initialLoad: boolean = true
 ): UseCompanionsReturn => {
   const [companions, setCompanions] = useState<User[]>([]);
   const [pendingRequests, setPendingRequests] = useState<CompanionRequest[]>([]);
@@ -25,7 +28,23 @@ export const useCompanions = (
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
 
-  // Real-time listener for companion requests
+  // Real-time listener for companions list
+  useEffect(() => {
+    if (!userId) return;
+
+    setLoading(true);
+    const unsubscribe = companionsService.subscribeToCompanions(
+      userId,
+      companions => {
+        setCompanions(companions);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [userId]);
+
+  // Real-time listener for incoming companion requests
   useEffect(() => {
     if (!userId) return;
 
@@ -40,10 +59,10 @@ export const useCompanions = (
   }, [userId]);
 
   const refreshCompanions = useCallback(async () => {
+    if (!userId) return;
     try {
       setLoading(true);
       setError(null);
-
       const fetchedCompanions = await companionsService.getCompanions(userId);
       setCompanions(fetchedCompanions);
     } catch (err) {
@@ -71,17 +90,27 @@ export const useCompanions = (
     [userId, showToast]
   );
 
+  const cancelRequest = useCallback(
+    async (receiverId: string) => {
+      try {
+        await companionsService.cancelRequest(userId, receiverId);
+        showToast('Companion request cancelled', 'info');
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : 'Failed to cancel request';
+        showToast(errorMessage, 'error');
+        throw err;
+      }
+    },
+    [userId, showToast]
+  );
+
   const acceptRequest = useCallback(
     async (requestId: string) => {
       try {
         await companionsService.acceptRequest(requestId);
-
-        // Remove from pending requests
         setPendingRequests(prev => prev.filter(r => r.id !== requestId));
-
-        // Refresh companions list
         await refreshCompanions();
-
         showToast('Companion request accepted!', 'success');
       } catch (err) {
         const errorMessage =
@@ -97,14 +126,11 @@ export const useCompanions = (
     async (requestId: string) => {
       try {
         await companionsService.rejectRequest(requestId);
-
-        // Remove from pending requests
         setPendingRequests(prev => prev.filter(r => r.id !== requestId));
-
-        showToast('Companion request rejected', 'info');
+        showToast('Companion request declined', 'info');
       } catch (err) {
         const errorMessage =
-          err instanceof Error ? err.message : 'Failed to reject request';
+          err instanceof Error ? err.message : 'Failed to decline request';
         showToast(errorMessage, 'error');
         throw err;
       }
@@ -116,10 +142,7 @@ export const useCompanions = (
     async (companionId: string) => {
       try {
         await companionsService.removeCompanion(userId, companionId);
-
-        // Remove from companions list
         setCompanions(prev => prev.filter(c => c.id !== companionId));
-
         showToast('Companion removed', 'info');
       } catch (err) {
         const errorMessage =
@@ -131,12 +154,17 @@ export const useCompanions = (
     [userId, showToast]
   );
 
-  // Load companions on mount if initialLoad is true
-  useEffect(() => {
-    if (initialLoad) {
-      refreshCompanions();
-    }
-  }, [initialLoad, refreshCompanions]);
+  const getRelationshipStatus = useCallback(
+    (targetUserId: string) =>
+      companionsService.getRelationshipStatus(userId, targetUserId),
+    [userId]
+  );
+
+  const getReceivedRequestId = useCallback(
+    (senderId: string) =>
+      companionsService.getReceivedRequestId(userId, senderId),
+    [userId]
+  );
 
   return {
     companions,
@@ -144,9 +172,12 @@ export const useCompanions = (
     loading,
     error,
     sendRequest,
+    cancelRequest,
     acceptRequest,
     rejectRequest,
     removeCompanion,
+    getRelationshipStatus,
+    getReceivedRequestId,
     refreshCompanions,
   };
 };

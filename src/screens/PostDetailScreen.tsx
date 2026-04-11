@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,10 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button, Input, Post, Comment } from '../components/ui';
+import { LandmarkModal } from '../components/ui/LandmarkModal';
 import { theme } from '../constants/theme';
 import { useComments } from '../hooks';
-import { Post as PostType, Comment as CommentType } from '../types';
+import { Post as PostType, Comment as CommentType, Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import { useAuthStore } from '../store/authStore';
+import { useNavigation } from '@react-navigation/native';
 
 interface PostDetailScreenProps {
   route: {
@@ -21,19 +24,20 @@ interface PostDetailScreenProps {
       post: PostType;
     };
   };
-  navigation: {
-    goBack: () => void;
-  };
 }
 
 export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
   route,
-  navigation,
 }) => {
   const { post } = route.params;
+  const navigation = useNavigation();
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
   const [newComment, setNewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  
+  const [selectedLandmark, setSelectedLandmark] = useState<Landmark | null>(null);
+  const [landmarkModalVisible, setLandmarkModalVisible] = useState(false);
+
   const {
     comments,
     loading,
@@ -44,6 +48,15 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
   useEffect(() => {
     loadComments(post.id);
   }, [post.id, loadComments]);
+
+  const handlePostDeleted = useCallback(() => {
+    navigation.goBack();
+  }, [navigation]);
+
+  const handleLandmarkPress = useCallback((landmark: Landmark) => {
+    setSelectedLandmark(landmark);
+    setLandmarkModalVisible(true);
+  }, []);
 
   const handleSubmitComment = async () => {
     if (!newComment.trim() || submitting) return;
@@ -64,17 +77,7 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
 
   const renderComment = ({ item }: { item: CommentType }) => (
     <View style={styles.commentWrapper}>
-      <Comment comment={item} />
-    </View>
-  );
-
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <Button variant="ghost" size="sm" onPress={navigation.goBack}>
-        <Icon name="arrow-left" size={18} color={theme.colors.gray[600]} />
-      </Button>
-      <Text variant="h3" style={styles.headerTitle}>Post</Text>
-      <View style={styles.headerSpacer} />
+      <Comment comment={item} currentUserId={currentUserId} />
     </View>
   );
 
@@ -123,17 +126,16 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Post Detail */}
         <View>
-          <Post 
-            post={post} 
-            onLike={() => {}} 
-            onComment={() => {}} 
-            onShare={() => {}}
+          <Post
+            post={post}
+            currentUserId={currentUserId}
+            onComment={() => {}}
+            onLandmarkPress={handleLandmarkPress}
+            onDelete={handlePostDeleted}
             showFullContent={true}
           />
         </View>
@@ -143,7 +145,7 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
           <Text variant="h4" style={styles.commentsTitle}>
             Comments ({post.commentCount})
           </Text>
-          
+
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={theme.colors.primary[500]} />
@@ -164,8 +166,18 @@ export const PostDetailScreen: React.FC<PostDetailScreenProps> = ({
           )}
         </View>
       </ScrollView>
-      
+
       {renderCommentInput()}
+
+      {/* Landmark Detail Modal */}
+      <LandmarkModal
+        landmark={selectedLandmark}
+        visible={landmarkModalVisible}
+        onClose={() => {
+          setLandmarkModalVisible(false);
+          setSelectedLandmark(null);
+        }}
+      />
     </SafeAreaView>
   );
 };
@@ -174,22 +186,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[200],
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-  },
-  headerSpacer: {
-    width: 40, // Same width as back button for centering
   },
   content: {
     flex: 1,
@@ -245,8 +241,7 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.md,
     backgroundColor: theme.colors.white,
   },
-  textInput: {
-  },
+  textInput: {},
   submitButton: {
     minWidth: 60,
   },

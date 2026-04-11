@@ -9,13 +9,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Button, Post, CreatePostModal } from '../components/ui';
+import { LandmarkModal } from '../components/ui/LandmarkModal';
 import { theme } from '../constants/theme';
-import { usePosts, useCompanions } from '../hooks';
-import { Post as PostType, CreatePostData } from '../types';
+import { usePosts, useCompanions, useModeration } from '../hooks';
+import { Post as PostType, CreatePostData, Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
+import { useAuthStore } from '../store/authStore';
+import { followService } from '../services/followService';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -23,9 +26,14 @@ const FeedTab = () => {
   const navigation = useNavigation<NavigationProp>();
   const [showCreatePost, setShowCreatePost] = useState(false);
   const [showCompanionsOnly, setShowCompanionsOnly] = useState(false);
+  const [showFollowingOnly, setShowFollowingOnly] = useState(false);
+  const [selectedLandmark, setSelectedLandmark] = useState<Landmark | null>(null);
+  const [landmarkModalVisible, setLandmarkModalVisible] = useState(false);
 
-  const userId = 'mock-user-id'; // In real app, get from auth
+  const { user } = useAuthStore();
+  const userId = user?.id ?? '';
   const { companions } = useCompanions(userId);
+  const { mutedUserIds } = useModeration();
 
   const {
     posts,
@@ -36,22 +44,34 @@ const FeedTab = () => {
     loadMorePosts,
     refreshPosts,
     createPost,
+    removePost,
     loadCompanionPosts,
   } = usePosts();
 
   const handleToggleCompanionFilter = useCallback(() => {
-    setShowCompanionsOnly(prev => !prev);
-    if (!showCompanionsOnly) {
-      // Load companion posts
-      const companionIds = companions.map(c => c.id);
-      if (companionIds.length > 0) {
-        loadCompanionPosts(companionIds);
-      }
+    const newValue = !showCompanionsOnly;
+    setShowCompanionsOnly(newValue);
+    setShowFollowingOnly(false);
+    if (newValue) {
+      const companionIds = [userId, ...companions.map(c => c.id)];
+      loadCompanionPosts(companionIds);
     } else {
-      // Load all posts
       refreshPosts();
     }
-  }, [showCompanionsOnly, companions, loadCompanionPosts, refreshPosts]);
+  }, [showCompanionsOnly, userId, companions, loadCompanionPosts, refreshPosts]);
+
+  const handleToggleFollowingFilter = useCallback(async () => {
+    const newValue = !showFollowingOnly;
+    setShowFollowingOnly(newValue);
+    setShowCompanionsOnly(false);
+    if (newValue) {
+      const followingIds = await followService.getFollowingIds(userId);
+      const ids = [userId, ...followingIds];
+      loadCompanionPosts(ids);
+    } else {
+      refreshPosts();
+    }
+  }, [showFollowingOnly, userId, loadCompanionPosts, refreshPosts]);
 
   const handleComment = useCallback((postId: string) => {
     const post = posts.find(p => p.id === postId);
@@ -60,13 +80,12 @@ const FeedTab = () => {
     }
   }, [navigation, posts]);
 
-  const handleShare = useCallback((postId: string) => {
+  const handleShare = useCallback((_postId: string) => {
     // In a real app, this would open a share sheet
-    console.log('Share post:', postId);
   }, []);
 
-  const handleUserPress = useCallback((userId: string) => {
-    navigation.navigate('ProfileView', { userId });
+  const handleUserPress = useCallback((uid: string) => {
+    navigation.navigate('ProfileView', { userId: uid });
   }, [navigation]);
 
   const handleCreatePost = useCallback(async (postData: CreatePostData) => {
@@ -79,6 +98,11 @@ const FeedTab = () => {
     }
   }, [hasMore, loading, loadMorePosts]);
 
+  const handleLandmarkPress = useCallback((landmark: Landmark) => {
+    setSelectedLandmark(landmark);
+    setLandmarkModalVisible(true);
+  }, []);
+
   const renderPost = useCallback(({ item }: { item: PostType }) => (
     <TouchableOpacity
       activeOpacity={0.95}
@@ -86,12 +110,15 @@ const FeedTab = () => {
     >
       <Post
         post={item}
+        currentUserId={userId}
         onComment={handleComment}
         onShare={handleShare}
         onUserPress={handleUserPress}
+        onLandmarkPress={handleLandmarkPress}
+        onDelete={removePost}
       />
     </TouchableOpacity>
-  ), [handleComment, handleShare, handleUserPress, navigation]);
+  ), [handleComment, handleShare, handleUserPress, handleLandmarkPress, navigation, userId]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -105,7 +132,7 @@ const FeedTab = () => {
         >
           <Icon
             name="user-group"
-            size={16}
+            size={14}
             color={showCompanionsOnly ? theme.colors.white : theme.colors.primary[500]}
           />
           <Text
@@ -114,6 +141,23 @@ const FeedTab = () => {
             style={styles.filterText}
           >
             Companions
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, showFollowingOnly && styles.filterButtonActive]}
+          onPress={handleToggleFollowingFilter}
+        >
+          <Icon
+            name="rss"
+            size={14}
+            color={showFollowingOnly ? theme.colors.white : theme.colors.primary[500]}
+          />
+          <Text
+            variant="caption"
+            color={showFollowingOnly ? 'white' : 'primary.500'}
+            style={styles.filterText}
+          >
+            Following
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -147,7 +191,7 @@ const FeedTab = () => {
 
   const renderFooter = () => {
     if (!loading || posts.length === 0) return null;
-    
+
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator size="small" color={theme.colors.primary[500]} />
@@ -189,9 +233,16 @@ const FeedTab = () => {
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
-      
+
       <FlatList
-        data={posts}
+        data={posts.filter(p => {
+          if (mutedUserIds.includes(p.userId)) return false;
+          if (showCompanionsOnly) {
+            const companionIds = new Set([userId, ...companions.map(c => c.id)]);
+            return companionIds.has(p.userId);
+          }
+          return true;
+        })}
         renderItem={renderPost}
         keyExtractor={item => item.id}
         style={styles.flatList}
@@ -217,6 +268,16 @@ const FeedTab = () => {
         visible={showCreatePost}
         onClose={() => setShowCreatePost(false)}
         onSubmit={handleCreatePost}
+      />
+
+      {/* Landmark Detail Modal */}
+      <LandmarkModal
+        landmark={selectedLandmark}
+        visible={landmarkModalVisible}
+        onClose={() => {
+          setLandmarkModalVisible(false);
+          setSelectedLandmark(null);
+        }}
       />
     </SafeAreaView>
   );

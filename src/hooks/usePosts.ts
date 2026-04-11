@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Post, CreatePostData } from '../types';
 import { postsService } from '../services/postsService';
+import { pointsService } from '../services/pointsService';
 import { useToast } from './useToast';
 import { useAuthStore } from '../store/authStore';
 
@@ -14,6 +15,7 @@ export interface UsePostsReturn {
   loadMorePosts: () => Promise<void>;
   refreshPosts: () => Promise<void>;
   createPost: (postData: CreatePostData) => Promise<void>;
+  removePost: (postId: string) => void;
   loadPostsNearLocation: (latitude: number, longitude: number, radius?: number) => Promise<void>;
   loadCompanionPosts: (companionIds: string[]) => Promise<void>;
 }
@@ -26,7 +28,7 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
   const [hasMore, setHasMore] = useState(true);
   const [lastPostId, setLastPostId] = useState<string | undefined>();
 
-  const { user } = useAuthStore();
+  const { user, updateUser } = useAuthStore();
   const { showToast } = useToast();
 
   const loadPosts = useCallback(async () => {
@@ -92,16 +94,31 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
       showToast('You must be signed in to post', 'error');
       return;
     }
+
+    // Hard limit: 10 posts per day
+    const todayCount = await pointsService.getTodayPostCount(user.id);
+    if (todayCount >= 10) {
+      showToast("You've reached today's limit of 10 posts", 'error');
+      return;
+    }
+
     try {
       const newPost = await postsService.createPost(postData, user.id, user);
       setPosts(prev => [newPost, ...prev]);
+
+      // Reflect earned points locally: 5 pts base + 1 pt per photo/video
+      const imageCount = postData.images?.length ?? 0;
+      const videoCount = postData.videos?.length ?? 0;
+      const earned = 5 + imageCount + videoCount;
+      updateUser({ pointsBalance: (user.pointsBalance ?? 0) + earned });
+
       showToast('Post created successfully!', 'success');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create post';
       showToast(errorMessage, 'error');
       throw err;
     }
-  }, [user, showToast]);
+  }, [user, showToast, updateUser]);
 
   const loadCompanionPosts = useCallback(async (companionIds: string[]) => {
     try {
@@ -120,6 +137,10 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
       setLoading(false);
     }
   }, [showToast]);
+
+  const removePost = useCallback((postId: string) => {
+    setPosts(prev => prev.filter(p => p.id !== postId));
+  }, []);
 
   const loadPostsNearLocation = useCallback(async (
     latitude: number, 
@@ -165,6 +186,7 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
     loadMorePosts,
     refreshPosts,
     createPost,
+    removePost,
     loadPostsNearLocation,
     loadCompanionPosts,
   };

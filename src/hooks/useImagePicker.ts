@@ -1,24 +1,45 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Alert, Platform, PermissionsAndroid } from 'react-native';
-import { launchImageLibrary, launchCamera, MediaType, ImagePickerResponse } from 'react-native-image-picker';
+import { launchImageLibrary, launchCamera, ImagePickerResponse } from 'react-native-image-picker';
 import { useToast } from './useToast';
 import { postsService } from '../services';
+import { useAuthStore } from '../store/authStore';
+
+export interface SelectedMedia {
+  uri: string;
+  type: 'image' | 'video';
+}
 
 export interface UseImagePickerReturn {
-  selectedImages: string[];
+  selectedImages: string[];           // legacy: image URIs only
+  selectedMedia: SelectedMedia[];     // new: all selected media (images + videos)
   uploading: boolean;
   pickImages: () => Promise<void>;
   takePicture: () => Promise<void>;
   uploadImages: (images: string[]) => Promise<string[]>;
+  uploadMedia: () => Promise<{ imageUrls: string[]; videoUrls: string[] }>;
   removeImage: (index: number) => void;
+  removeMedia: (index: number) => void;
   clearImages: () => void;
 }
 
+const MAX_MEDIA = 10;
+
 export const useImagePicker = (): UseImagePickerReturn => {
-  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [selectedMedia, setSelectedMedia] = useState<SelectedMedia[]>([]);
   const [uploading, setUploading] = useState(false);
-  
+
+  // Keep a ref in sync so callbacks can read current count without stale closures
+  const selectedMediaRef = useRef<SelectedMedia[]>([]);
+  selectedMediaRef.current = selectedMedia;
+
   const { showToast } = useToast();
+  const { user } = useAuthStore();
+
+  // Legacy compat: expose just image URIs
+  const selectedImages = selectedMedia
+    .filter(m => m.type === 'image')
+    .map(m => m.uri);
 
   const requestCameraPermission = async (): Promise<boolean> => {
     if (Platform.OS === 'android') {
@@ -27,7 +48,7 @@ export const useImagePicker = (): UseImagePickerReturn => {
           PermissionsAndroid.PERMISSIONS.CAMERA,
           {
             title: 'Camera Permission',
-            message: 'Historia needs camera permission to take photos',
+            message: 'Historia needs camera permission to take photos and videos',
             buttonNeutral: 'Ask Me Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',
@@ -42,49 +63,46 @@ export const useImagePicker = (): UseImagePickerReturn => {
     return true;
   };
 
-  const showImagePicker = useCallback(() => {
-    Alert.alert(
-      'Select Image',
-      'Choose how you want to add an image',
-      [
-        { text: 'Camera', onPress: () => takePicture() },
-        { text: 'Photo Library', onPress: () => pickImages() },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-      { cancelable: true }
-    );
-  }, []);
-
   const pickImages = useCallback(async () => {
+    const remaining = MAX_MEDIA - selectedMediaRef.current.length;
+
+    if (remaining <= 0) {
+      showToast(`You can only add up to ${MAX_MEDIA} photos/videos per post`, 'error');
+      return;
+    }
+
     const options = {
-      mediaType: 'photo' as MediaType,
+      mediaType: 'mixed' as const,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8,
-      selectionLimit: 5, // Allow multiple selection
+      quality: 0.8 as any,
+      videoQuality: 'medium' as const,
+      selectionLimit: remaining,
     };
 
-    try {
-      launchImageLibrary(options, (response: ImagePickerResponse) => {
-        if (response.didCancel || response.errorMessage) {
-          if (response.errorMessage) {
-            showToast('Error selecting images: ' + response.errorMessage, 'error');
-          }
-          return;
+    launchImageLibrary(options, (response: ImagePickerResponse) => {
+      if (response.didCancel || response.errorMessage) {
+        if (response.errorMessage) {
+          showToast('Error selecting media: ' + response.errorMessage, 'error');
         }
+        return;
+      }
 
-        if (response.assets) {
-          const newImages = response.assets
-            .filter(asset => asset.uri)
-            .map(asset => asset.uri!);
-          
-          setSelectedImages(prev => [...prev, ...newImages]);
-        }
-      });
-    } catch (error) {
-      showToast('Error accessing photo library', 'error');
-    }
+      if (response.assets) {
+        const newMedia: SelectedMedia[] = response.assets
+          .filter(asset => asset.uri)
+          .map(asset => ({
+            uri: asset.uri!,
+            type: asset.type?.startsWith('video/') ? 'video' : 'image',
+          }));
+
+        setSelectedMedia(current => {
+          const slots = MAX_MEDIA - current.length;
+          return [...current, ...newMedia.slice(0, slots)];
+        });
+      }
+    });
   }, [showToast]);
 
   const takePicture = useCallback(async () => {
@@ -95,11 +113,11 @@ export const useImagePicker = (): UseImagePickerReturn => {
     }
 
     const options = {
-      mediaType: 'photo' as MediaType,
+      mediaType: 'photo' as const,
       includeBase64: false,
       maxHeight: 2000,
       maxWidth: 2000,
-      quality: 0.8,
+      quality: 0.8 as any,
       saveToPhotos: true,
     };
 
@@ -113,7 +131,13 @@ export const useImagePicker = (): UseImagePickerReturn => {
         }
 
         if (response.assets && response.assets[0]?.uri) {
-          setSelectedImages(prev => [...prev, response.assets[0].uri!]);
+          setSelectedMedia(prev => {
+            if (prev.length >= MAX_MEDIA) {
+              showToast(`You can only add up to ${MAX_MEDIA} photos/videos per post`, 'error');
+              return prev;
+            }
+            return [...prev, { uri: response.assets![0].uri!, type: 'image' }];
+          });
         }
       });
     } catch (error) {
@@ -121,51 +145,90 @@ export const useImagePicker = (): UseImagePickerReturn => {
     }
   }, [showToast]);
 
+  const showImagePicker = useCallback(async () => {
+    Alert.alert(
+      'Add Media',
+      'Choose how you want to add photos or videos',
+      [
+        { text: 'Camera', onPress: () => takePicture() },
+        { text: 'Photo/Video Library', onPress: () => pickImages() },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+      { cancelable: true }
+    );
+  }, [takePicture, pickImages]);
+
   const uploadImages = useCallback(async (images: string[]): Promise<string[]> => {
     if (images.length === 0) return [];
-
     try {
       setUploading(true);
-      
-      // Upload images sequentially to avoid overwhelming the server
-      const uploadPromises = images.map(async (imageUri, index) => {
-        try {
-          const userId = 'mock-user-id'; // In real app, get from auth
-          return await postsService.uploadImage(imageUri, userId);
-        } catch (error) {
-          console.error(`Error uploading image ${index}:`, error);
-          throw error;
-        }
-      });
-
-      const uploadedUrls = await Promise.all(uploadPromises);
-      showToast(`Successfully uploaded ${uploadedUrls.length} image(s)`, 'success');
-      
-      return uploadedUrls;
+      const urls = await Promise.all(
+        images.map((uri, i) =>
+          postsService.uploadImage(uri, user?.id ?? '').catch(err => {
+            console.error(`Error uploading image ${i}:`, err);
+            throw err;
+          })
+        )
+      );
+      showToast(`Successfully uploaded ${urls.length} image(s)`, 'success');
+      return urls;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to upload images';
-      showToast(errorMessage, 'error');
+      const msg = error instanceof Error ? error.message : 'Failed to upload images';
+      showToast(msg, 'error');
       throw error;
     } finally {
       setUploading(false);
     }
-  }, [showToast]);
+  }, [showToast, user?.id]);
+
+  const uploadMedia = useCallback(async (): Promise<{ imageUrls: string[]; videoUrls: string[] }> => {
+    const images = selectedMedia.filter(m => m.type === 'image');
+    const videos = selectedMedia.filter(m => m.type === 'video');
+
+    setUploading(true);
+    try {
+      const imageUrls = await Promise.all(
+        images.map(m => postsService.uploadImage(m.uri, user?.id ?? ''))
+      );
+      const videoUrls = await Promise.all(
+        videos.map(m => postsService.uploadVideo(m.uri, user?.id ?? ''))
+      );
+      return { imageUrls, videoUrls };
+    } finally {
+      setUploading(false);
+    }
+  }, [selectedMedia, user?.id]);
 
   const removeImage = useCallback((index: number) => {
-    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+    // Remove by index from images-only array (legacy compat)
+    setSelectedMedia(prev => {
+      const imageIndices = prev
+        .map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.type === 'image')
+        .map(({ i }) => i);
+      const globalIndex = imageIndices[index];
+      return prev.filter((_, i) => i !== globalIndex);
+    });
+  }, []);
+
+  const removeMedia = useCallback((index: number) => {
+    setSelectedMedia(prev => prev.filter((_, i) => i !== index));
   }, []);
 
   const clearImages = useCallback(() => {
-    setSelectedImages([]);
+    setSelectedMedia([]);
   }, []);
 
   return {
     selectedImages,
+    selectedMedia,
     uploading,
     pickImages: showImagePicker,
     takePicture,
     uploadImages,
+    uploadMedia,
     removeImage,
+    removeMedia,
     clearImages,
   };
 };

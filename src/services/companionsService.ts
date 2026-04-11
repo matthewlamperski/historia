@@ -1,108 +1,42 @@
-// Firebase imports with error handling
-let firestore: any = null;
-
-try {
-  firestore = require('@react-native-firebase/firestore').default;
-} catch {
-  console.warn('Firebase modules not available, using mock data only');
-}
-
+import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from './firebaseConfig';
 import { CompanionRequest, User } from '../types';
+import { notificationService } from './notificationService';
 
-// Mock users for companions
-const mockUsers: User[] = [
-  {
-    id: 'mock-companion-1',
-    name: 'Sarah Chen',
-    username: 'sarahc_photo',
-    email: 'sarah@historia.app',
-    avatar: 'https://images.unsplash.com/photo-1494790108755-2616b9d4c3a0?w=150&h=150&fit=crop&crop=face',
-    followerCount: 567,
-    followingCount: 234,
-    postCount: 78,
-    isVerified: true,
-    companions: [],
-    visitedLandmarks: [],
-    bookmarkedLandmarks: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'mock-companion-2',
-    name: 'Marcus Johnson',
-    username: 'marcus_j',
-    email: 'marcus@historia.app',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face',
-    followerCount: 123,
-    followingCount: 298,
-    postCount: 15,
-    isVerified: false,
-    companions: [],
-    visitedLandmarks: [],
-    bookmarkedLandmarks: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-const mockRequests: CompanionRequest[] = [
-  {
-    id: 'request-1',
-    senderId: 'mock-companion-1',
-    sender: mockUsers[0],
-    receiverId: 'mock-user-id',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2 hours ago
-    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-  },
-];
+export type RelationshipStatus =
+  | 'none'
+  | 'companions'
+  | 'request_sent'
+  | 'request_received';
 
 class CompanionsService {
-  private isFirebaseAvailable(): boolean {
-    try {
-      if (!firestore) return false;
-      firestore();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   // Send a companion request
   async sendCompanionRequest(
     senderId: string,
     receiverId: string
   ): Promise<CompanionRequest> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
-
-      const request: CompanionRequest = {
-        id: `request-${Date.now()}`,
-        senderId,
-        receiverId,
-        sender: mockUsers[0],
-        receiver: mockUsers[1],
-        status: 'pending',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      console.log('Sent companion request:', request);
-      return request;
-    }
-
     try {
-      // Check if request already exists
-      const existingSnapshot = await firestore()
-        .collection(COLLECTIONS.COMPANION_REQUESTS)
-        .where('senderId', '==', senderId)
-        .where('receiverId', '==', receiverId)
-        .where('status', '==', 'pending')
-        .get();
+      // Check if request already exists in either direction
+      const [sentSnapshot, receivedSnapshot] = await Promise.all([
+        firestore()
+          .collection(COLLECTIONS.COMPANION_REQUESTS)
+          .where('senderId', '==', senderId)
+          .where('receiverId', '==', receiverId)
+          .where('status', '==', 'pending')
+          .get(),
+        firestore()
+          .collection(COLLECTIONS.COMPANION_REQUESTS)
+          .where('senderId', '==', receiverId)
+          .where('receiverId', '==', senderId)
+          .where('status', '==', 'pending')
+          .get(),
+      ]);
 
-      if (!existingSnapshot.empty) {
-        throw new Error('Companion request already exists');
+      if (!sentSnapshot.empty) {
+        throw new Error('Companion request already sent');
+      }
+      if (!receivedSnapshot.empty) {
+        throw new Error('This user already sent you a request — check your notifications');
       }
 
       // Check if already companions
@@ -111,13 +45,12 @@ class CompanionsService {
         .doc(senderId)
         .get();
 
-      const companions = senderDoc.data()?.companions || [];
+      const companions: string[] = senderDoc.data()?.companions ?? [];
       if (companions.includes(receiverId)) {
         throw new Error('Already companions');
       }
 
       const now = firestore.Timestamp.now();
-
       const requestData = {
         senderId,
         receiverId,
@@ -130,16 +63,28 @@ class CompanionsService {
         .collection(COLLECTIONS.COMPANION_REQUESTS)
         .add(requestData);
 
-      // Fetch sender and receiver data
-      const receiverDoc = await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(receiverId)
-        .get();
+      // Fetch both user docs for the return value and notification
+      const [receiverDoc] = await Promise.all([
+        firestore().collection(COLLECTIONS.USERS).doc(receiverId).get(),
+      ]);
+
+      const senderData = senderDoc.data() as User;
+
+      // Create an in-app notification for the receiver
+      await notificationService.createNotification({
+        recipientId: receiverId,
+        senderId,
+        senderName: senderData?.name ?? 'Someone',
+        senderAvatar: senderData?.avatar,
+        senderUsername: senderData?.username,
+        type: 'companion_request',
+        referenceId: docRef.id,
+      });
 
       return {
         id: docRef.id,
         ...requestData,
-        sender: senderDoc.data() as User,
+        sender: senderData,
         receiver: receiverDoc.data() as User,
         createdAt: now.toDate(),
         updatedAt: now.toDate(),
@@ -152,12 +97,6 @@ class CompanionsService {
 
   // Accept a companion request
   async acceptRequest(requestId: string): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
-      console.log('Accepted companion request:', requestId);
-      return;
-    }
-
     try {
       const requestRef = firestore()
         .collection(COLLECTIONS.COMPANION_REQUESTS)
@@ -165,11 +104,11 @@ class CompanionsService {
 
       const requestDoc = await requestRef.get();
 
-      if (!requestDoc.exists) {
+      if (!requestDoc.exists()) {
         throw new Error('Companion request not found');
       }
 
-      const requestData = requestDoc.data();
+      const requestData = requestDoc.data()!;
 
       if (requestData.status !== 'pending') {
         throw new Error('Request has already been processed');
@@ -177,26 +116,42 @@ class CompanionsService {
 
       const { senderId, receiverId } = requestData;
 
-      // Update request status
-      await requestRef.update({
-        status: 'accepted',
-        updatedAt: firestore.Timestamp.now(),
-      });
+      // Run all writes in parallel
+      await Promise.all([
+        requestRef.update({
+          status: 'accepted',
+          updatedAt: firestore.Timestamp.now(),
+        }),
+        firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(senderId)
+          .update({
+            companions: firestore.FieldValue.arrayUnion(receiverId),
+          }),
+        firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(receiverId)
+          .update({
+            companions: firestore.FieldValue.arrayUnion(senderId),
+          }),
+      ]);
 
-      // Add each user to the other's companions list
-      await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(senderId)
-        .update({
-          companions: firestore.FieldValue.arrayUnion(receiverId),
-        });
-
-      await firestore()
+      // Notify the original sender that their request was accepted
+      const receiverDoc = await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(receiverId)
-        .update({
-          companions: firestore.FieldValue.arrayUnion(senderId),
-        });
+        .get();
+      const receiverData = receiverDoc.data() as User;
+
+      await notificationService.createNotification({
+        recipientId: senderId,
+        senderId: receiverId,
+        senderName: receiverData?.name ?? 'Someone',
+        senderAvatar: receiverData?.avatar,
+        senderUsername: receiverData?.username,
+        type: 'companion_accepted',
+        referenceId: requestId,
+      });
     } catch (error) {
       console.error('Error accepting companion request:', error);
       throw error;
@@ -205,12 +160,6 @@ class CompanionsService {
 
   // Reject a companion request
   async rejectRequest(requestId: string): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
-      console.log('Rejected companion request:', requestId);
-      return;
-    }
-
     try {
       const requestRef = firestore()
         .collection(COLLECTIONS.COMPANION_REQUESTS)
@@ -218,13 +167,11 @@ class CompanionsService {
 
       const requestDoc = await requestRef.get();
 
-      if (!requestDoc.exists) {
+      if (!requestDoc.exists()) {
         throw new Error('Companion request not found');
       }
 
-      const requestData = requestDoc.data();
-
-      if (requestData.status !== 'pending') {
+      if (requestDoc.data()!.status !== 'pending') {
         throw new Error('Request has already been processed');
       }
 
@@ -238,22 +185,104 @@ class CompanionsService {
     }
   }
 
-  // Get user's companions
-  async getCompanions(userId: string): Promise<User[]> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      // Return mock companions
-      return mockUsers;
-    }
+  // Cancel a sent companion request
+  async cancelRequest(senderId: string, receiverId: string): Promise<void> {
+    try {
+      const snapshot = await firestore()
+        .collection(COLLECTIONS.COMPANION_REQUESTS)
+        .where('senderId', '==', senderId)
+        .where('receiverId', '==', receiverId)
+        .where('status', '==', 'pending')
+        .get();
 
+      if (snapshot.empty) {
+        throw new Error('No pending request found');
+      }
+
+      const batch = firestore().batch();
+      snapshot.docs.forEach(doc => {
+        batch.update(doc.ref, {
+          status: 'cancelled',
+          updatedAt: firestore.Timestamp.now(),
+        });
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error('Error cancelling companion request:', error);
+      throw error;
+    }
+  }
+
+  // Get the relationship status between two users
+  async getRelationshipStatus(
+    currentUserId: string,
+    targetUserId: string
+  ): Promise<RelationshipStatus> {
+    try {
+      // Check companions array first (fast)
+      const userDoc = await firestore()
+        .collection(COLLECTIONS.USERS)
+        .doc(currentUserId)
+        .get();
+
+      const companions: string[] = userDoc.data()?.companions ?? [];
+      if (companions.includes(targetUserId)) {
+        return 'companions';
+      }
+
+      // Check for pending requests in both directions
+      const [sentSnapshot, receivedSnapshot] = await Promise.all([
+        firestore()
+          .collection(COLLECTIONS.COMPANION_REQUESTS)
+          .where('senderId', '==', currentUserId)
+          .where('receiverId', '==', targetUserId)
+          .where('status', '==', 'pending')
+          .get(),
+        firestore()
+          .collection(COLLECTIONS.COMPANION_REQUESTS)
+          .where('senderId', '==', targetUserId)
+          .where('receiverId', '==', currentUserId)
+          .where('status', '==', 'pending')
+          .get(),
+      ]);
+
+      if (!sentSnapshot.empty) return 'request_sent';
+      if (!receivedSnapshot.empty) return 'request_received';
+      return 'none';
+    } catch (error) {
+      console.error('Error getting relationship status:', error);
+      return 'none';
+    }
+  }
+
+  // Get the pending request ID sent from target to current user (for accepting)
+  async getReceivedRequestId(
+    currentUserId: string,
+    senderId: string
+  ): Promise<string | null> {
+    try {
+      const snapshot = await firestore()
+        .collection(COLLECTIONS.COMPANION_REQUESTS)
+        .where('senderId', '==', senderId)
+        .where('receiverId', '==', currentUserId)
+        .where('status', '==', 'pending')
+        .limit(1)
+        .get();
+      return snapshot.empty ? null : snapshot.docs[0].id;
+    } catch {
+      return null;
+    }
+  }
+
+  // Get user's companions (full User objects)
+  async getCompanions(userId: string): Promise<User[]> {
     try {
       const userDoc = await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(userId)
         .get();
 
-      const companionIds = userDoc.data()?.companions || [];
-
+      const companionIds: string[] = userDoc.data()?.companions ?? [];
       if (companionIds.length === 0) return [];
 
       const companions = await Promise.all(
@@ -262,25 +291,20 @@ class CompanionsService {
             .collection(COLLECTIONS.USERS)
             .doc(id)
             .get();
-
-          return companionDoc.exists ? (companionDoc.data() as User) : null;
+          if (!companionDoc.exists()) return null;
+          return { id: companionDoc.id, ...companionDoc.data() } as User;
         })
       );
 
-      return companions.filter(c => c !== null) as User[];
+      return companions.filter((c): c is User => c !== null);
     } catch (error) {
       console.error('Error fetching companions:', error);
       return [];
     }
   }
 
-  // Get pending companion requests for a user
+  // Get pending companion requests for a user (incoming)
   async getPendingRequests(userId: string): Promise<CompanionRequest[]> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return mockRequests;
-    }
-
     try {
       const snapshot = await firestore()
         .collection(COLLECTIONS.COMPANION_REQUESTS)
@@ -290,10 +314,8 @@ class CompanionsService {
         .get();
 
       const requests = await Promise.all(
-        snapshot.docs.map(async (doc: any) => {
+        snapshot.docs.map(async doc => {
           const data = doc.data();
-
-          // Fetch sender data
           const senderDoc = await firestore()
             .collection(COLLECTIONS.USERS)
             .doc(data.senderId)
@@ -302,9 +324,11 @@ class CompanionsService {
           return {
             id: doc.id,
             ...data,
-            sender: senderDoc.exists ? (senderDoc.data() as User) : null,
-            createdAt: data.createdAt?.toDate() || new Date(),
-            updatedAt: data.updatedAt?.toDate() || new Date(),
+            sender: senderDoc.exists()
+              ? ({ id: senderDoc.id, ...senderDoc.data() } as User)
+              : null,
+            createdAt: data.createdAt?.toDate() ?? new Date(),
+            updatedAt: data.updatedAt?.toDate() ?? new Date(),
           } as CompanionRequest;
         })
       );
@@ -316,16 +340,44 @@ class CompanionsService {
     }
   }
 
-  // Subscribe to companion requests (real-time)
+  // Subscribe to companions list (real-time — watches user doc companions array)
+  subscribeToCompanions(
+    userId: string,
+    callback: (companions: User[]) => void
+  ): () => void {
+    return firestore()
+      .collection(COLLECTIONS.USERS)
+      .doc(userId)
+      .onSnapshot(
+        async snapshot => {
+          const companionIds: string[] = snapshot.data()?.companions ?? [];
+          if (companionIds.length === 0) {
+            callback([]);
+            return;
+          }
+          const companions = await Promise.all(
+            companionIds.map(async (id: string) => {
+              const doc = await firestore()
+                .collection(COLLECTIONS.USERS)
+                .doc(id)
+                .get();
+              if (!doc.exists()) return null;
+              return { id: doc.id, ...doc.data() } as User;
+            })
+          );
+          callback(companions.filter((c): c is User => c !== null));
+        },
+        error => {
+          console.error('Error listening to companions:', error);
+        }
+      );
+  }
+
+  // Subscribe to companion requests (real-time, incoming only)
   subscribeToCompanionRequests(
     userId: string,
     callback: (requests: CompanionRequest[]) => void
   ): () => void {
-    if (!this.isFirebaseAvailable()) {
-      callback(mockRequests);
-      return () => {};
-    }
-
     try {
       const unsubscribe = firestore()
         .collection(COLLECTIONS.COMPANION_REQUESTS)
@@ -333,12 +385,10 @@ class CompanionsService {
         .where('status', '==', 'pending')
         .orderBy('createdAt', 'desc')
         .onSnapshot(
-          async (snapshot: any) => {
+          async snapshot => {
             const requests = await Promise.all(
-              snapshot.docs.map(async (doc: any) => {
+              snapshot.docs.map(async doc => {
                 const data = doc.data();
-
-                // Fetch sender data
                 const senderDoc = await firestore()
                   .collection(COLLECTIONS.USERS)
                   .doc(data.senderId)
@@ -347,52 +397,45 @@ class CompanionsService {
                 return {
                   id: doc.id,
                   ...data,
-                  sender: senderDoc.exists ? (senderDoc.data() as User) : null,
-                  createdAt: data.createdAt?.toDate() || new Date(),
-                  updatedAt: data.updatedAt?.toDate() || new Date(),
+                  sender: senderDoc.exists()
+                    ? ({ id: senderDoc.id, ...senderDoc.data() } as User)
+                    : null,
+                  createdAt: data.createdAt?.toDate() ?? new Date(),
+                  updatedAt: data.updatedAt?.toDate() ?? new Date(),
                 } as CompanionRequest;
               })
             );
-
             callback(requests);
           },
-          (error: any) => {
+          error => {
             console.error('Error listening to companion requests:', error);
-            callback(mockRequests);
+            callback([]);
           }
         );
-
       return unsubscribe;
     } catch (error) {
       console.error('Error subscribing to companion requests:', error);
-      callback(mockRequests);
       return () => {};
     }
   }
 
-  // Remove a companion
+  // Remove a companion (bidirectional)
   async removeCompanion(userId: string, companionId: string): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
-      console.log('Removed companion:', companionId);
-      return;
-    }
-
     try {
-      // Remove from both users' companions lists
-      await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(userId)
-        .update({
-          companions: firestore.FieldValue.arrayRemove(companionId),
-        });
-
-      await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(companionId)
-        .update({
-          companions: firestore.FieldValue.arrayRemove(userId),
-        });
+      await Promise.all([
+        firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(userId)
+          .update({
+            companions: firestore.FieldValue.arrayRemove(companionId),
+          }),
+        firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(companionId)
+          .update({
+            companions: firestore.FieldValue.arrayRemove(userId),
+          }),
+      ]);
     } catch (error) {
       console.error('Error removing companion:', error);
       throw error;

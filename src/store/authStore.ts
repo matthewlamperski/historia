@@ -6,6 +6,8 @@ import { appleAuth } from '@invertase/react-native-apple-authentication';
 import { Platform } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from '../services/firebaseConfig';
+import { handleService } from '../services/handleService';
+import { referralService } from '../services/referralService';
 
 // Configure Google Sign-In
 // Note: webClientId is required for Firebase Auth - get it from Firebase Console > Authentication > Google
@@ -34,7 +36,8 @@ interface AuthState {
   signUpWithEmail: (
     email: string,
     password: string,
-    displayName: string
+    displayName: string,
+    handle?: string
   ) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
@@ -45,7 +48,8 @@ interface AuthState {
     userId: string,
     email: string,
     displayName: string,
-    photoURL?: string
+    photoURL?: string,
+    handle?: string
   ) => Promise<User>;
 }
 
@@ -119,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   // Sign up with email and password
-  signUpWithEmail: async (email, password, displayName) => {
+  signUpWithEmail: async (email, password, displayName, handle) => {
     set({ isLoading: true, error: null });
     try {
       const userCredential = await auth().createUserWithEmailAndPassword(
@@ -135,7 +139,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const userProfile = await get().createUserProfile(
         firebaseUser.uid,
         email,
-        displayName
+        displayName,
+        undefined,
+        handle
       );
 
       set({
@@ -364,12 +370,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   // Create user profile in Firestore
-  createUserProfile: async (userId, email, displayName, photoURL) => {
+  createUserProfile: async (userId, email, displayName, photoURL, handle) => {
     const now = new Date().toISOString();
+
+    // Generate a unique referral code for this user
+    const referralCode = await referralService.createReferralCodeForUser(userId);
 
     const newUser: Omit<User, 'id'> = {
       name: displayName,
       email,
+      username: handle,
       avatar: photoURL,
       bio: undefined,
       location: undefined,
@@ -379,11 +389,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       postCount: 0,
       isVerified: false,
       companions: [],
-      visitedLandmarks: [],
-      bookmarkedLandmarks: [],
+      bookmarkCount: 0,
       isPremium: false as boolean,
       pointsBalance: 0,
       subscriptionStatus: 'free' as const,
+      referralCode,
       createdAt: now,
       updatedAt: now,
     };
@@ -392,6 +402,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       .collection(COLLECTIONS.USERS)
       .doc(userId)
       .set(newUser);
+
+    // Reserve the handle in the uniqueness registry
+    if (handle) {
+      await handleService.reserveHandle(handle, userId);
+    }
 
     return {
       id: userId,

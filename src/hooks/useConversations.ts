@@ -13,6 +13,7 @@ export interface UseConversationsReturn {
   loadMoreConversations: () => Promise<void>;
   refreshConversations: () => Promise<void>;
   createOrOpenConversation: (otherUserId: string) => Promise<Conversation>;
+  createGroup: (name: string, participantIds: string[]) => Promise<Conversation>;
   markAsRead: (conversationId: string) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
 }
@@ -97,6 +98,32 @@ export const useConversations = (userId: string): UseConversationsReturn => {
     await loadConversations();
     setRefreshing(false);
   }, [loadConversations]);
+
+  // Create a group conversation
+  const createGroup = useCallback(
+    async (name: string, participantIds: string[]): Promise<Conversation> => {
+      try {
+        const conversation = await messagingService.createGroupConversation(
+          name,
+          userId,
+          participantIds
+        );
+
+        setConversations(prev => {
+          const exists = prev.some(c => c.id === conversation.id);
+          if (exists) return prev;
+          return [conversation, ...prev];
+        });
+
+        return conversation;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to create group';
+        showToast(errorMessage, 'error');
+        throw err;
+      }
+    },
+    [userId, showToast]
+  );
 
   // Create or open conversation with a user
   const createOrOpenConversation = useCallback(
@@ -198,6 +225,7 @@ export const useConversations = (userId: string): UseConversationsReturn => {
     loadMoreConversations,
     refreshConversations,
     createOrOpenConversation,
+    createGroup,
     markAsRead,
     deleteConversation,
   };

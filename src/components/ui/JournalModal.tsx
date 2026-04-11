@@ -301,8 +301,8 @@ const styles = StyleSheet.create({
   },
   locationRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     gap: 4,
+    alignItems: 'center',
   },
   locationText: {
     flex: 1,

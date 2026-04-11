@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,224 +10,346 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button, Post, ActionSheet, ReportModal } from '../components/ui';
+import { Text, Post, ActionSheet, ReportModal } from '../components/ui';
+import { LevelBadge } from '../components/ui/LevelBadge';
 import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { RootStackScreenProps, User, Post as PostType, RootStackParamList } from '../types';
+import {
+  RootStackScreenProps,
+  User,
+  Post as PostType,
+  RootStackParamList,
+} from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import firestore from '@react-native-firebase/firestore';
+import { COLLECTIONS } from '../services/firebaseConfig';
 import { messagingService } from '../services';
-import { useToast, useModeration } from '../hooks';
-
-// Mock user data for different profiles
-const MOCK_USERS: User[] = [
-  {
-    id: 'other-user-1',
-    name: 'Alice Smith',
-    username: 'alice_s',
-    email: 'alice@example.com',
-    avatar: 'https://i.pravatar.cc/150?img=5',
-    bio: '🏛️ Architecture historian | 📸 Capturing Cincinnati\'s hidden gems | Teaching history through storytelling',
-    location: 'Cincinnati, OH',
-    website: 'https://sarahhistory.blog',
-    followerCount: 2847,
-    followingCount: 892,
-    postCount: 156,
-    isVerified: true,
-    createdAt: '2023-03-10T08:15:00Z',
-    updatedAt: '2025-01-12T10:30:00Z'
-  },
-  {
-    id: 'user-2',
-    name: 'Mike Chen',
-    username: 'mike_explorer',
-    email: 'mike@example.com',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
-    bio: 'Urban explorer 🏙️ | History buff | Weekend warrior discovering Cincinnati one landmark at a time',
-    location: 'Covington, KY',
-    followerCount: 1523,
-    followingCount: 634,
-    postCount: 78,
-    isVerified: false,
-    createdAt: '2023-09-22T14:45:00Z',
-    updatedAt: '2025-01-11T16:20:00Z'
-  }
-];
-
-const MOCK_USER_POSTS: Record<string, PostType[]> = {
-  'user-1': [
-    {
-      id: 'sarah-post-1',
-      userId: 'user-1',
-      user: MOCK_USERS[0],
-      content: 'The intricate details on the Cincinnati Music Hall never cease to amaze me! Built in 1878, this Gothic Revival masterpiece has survived fire, renovation, and countless performances. Each gargoyle tells a story. 🎭✨',
-      images: ['https://images.unsplash.com/photo-1582739717734-0c6dd4c52c66?w=500'],
-      likes: ['current-user-123', 'user-3', 'user-4', 'user-5'],
-      commentCount: 23,
-      location: {
-        latitude: 39.1065,
-        longitude: -84.5201,
-        address: '1241 Elm St, Cincinnati, OH'
-      },
-      createdAt: new Date('2025-01-12T08:30:00Z'),
-      updatedAt: new Date('2025-01-12T08:30:00Z')
-    },
-    {
-      id: 'sarah-post-2',
-      userId: 'user-1',
-      user: MOCK_USERS[0],
-      content: 'Hidden architectural gem alert! 🚨 Found these incredible terra cotta details on a 1920s building in Over-the-Rhine. The craftsmanship from this era is unmatched. Who else loves hunting for these historical treasures?',
-      images: ['https://images.unsplash.com/photo-1486403303906-b71e0dcb1f8b?w=500'],
-      likes: ['current-user-123', 'user-2'],
-      commentCount: 15,
-      createdAt: new Date('2025-01-11T14:15:00Z'),
-      updatedAt: new Date('2025-01-11T14:15:00Z')
-    }
-  ],
-  'user-2': [
-    {
-      id: 'mike-post-1',
-      userId: 'user-2',
-      user: MOCK_USERS[1],
-      content: 'Epic sunrise shot from the Purple People Bridge this morning! 🌅 Fun fact: this pedestrian bridge connects Cincinnati and Newport and gives you the best views of both cities. Perfect spot for a morning jog!',
-      images: ['https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=500'],
-      likes: ['current-user-123', 'user-1', 'user-6'],
-      commentCount: 18,
-      location: {
-        latitude: 39.0937,
-        longitude: -84.5089,
-        address: 'Purple People Bridge, Newport, KY'
-      },
-      createdAt: new Date('2025-01-12T06:45:00Z'),
-      updatedAt: new Date('2025-01-12T06:45:00Z')
-    }
-  ]
-};
+import { useToast, useModeration, useCompanions } from '../hooks';
+import { useFollow } from '../hooks/useFollow';
+import { useAuthStore } from '../store/authStore';
+import { RelationshipStatus } from '../services/companionsService';
 
 type ProfileViewRouteProp = RouteProp<RootStackParamList, 'ProfileView'>;
 
 const ProfileView = () => {
-  const navigation = useNavigation<RootStackScreenProps<'ProfileView'>['navigation']>();
+  const navigation =
+    useNavigation<RootStackScreenProps<'ProfileView'>['navigation']>();
   const route = useRoute<ProfileViewRouteProp>();
   const { userId } = route.params;
-  console.log("User ID: ", userId);
+
+  const { user: currentUser } = useAuthStore();
+  const currentUserId = currentUser?.id ?? '';
+  const isOwnProfile = currentUserId === userId;
 
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<PostType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [isFollowingLoading, setIsFollowingLoading] = useState(false);
+
+  // Companion relationship state
+  const [relationshipStatus, setRelationshipStatus] =
+    useState<RelationshipStatus>('none');
+  const [companionLoading, setCompanionLoading] = useState(false);
+  // When status is 'request_received', we need the requestId to accept/reject
+  const [receivedRequestId, setReceivedRequestId] = useState<string | null>(null);
+
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
 
-  const { blockUser, isUserBlocked } = useModeration();
+  const { blockUser, isUserMuted, muteUser, unmuteUser } = useModeration();
+  const { showToast } = useToast();
+
+  const {
+    sendRequest,
+    cancelRequest,
+    acceptRequest,
+    rejectRequest,
+    removeCompanion,
+    getRelationshipStatus,
+    getReceivedRequestId,
+  } = useCompanions(currentUserId, false);
+
+  const {
+    isFollowing: isFollowingUser,
+    loading: followLoading,
+    toggleFollow,
+  } = useFollow(currentUserId, userId);
+
+  // Update header right button when we know if this is own profile
+  useEffect(() => {
+    if (isOwnProfile) return;
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setShowActionSheet(true)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{ marginRight: 4 }}
+        >
+          <Icon name="ellipsis" size={20} color={theme.colors.gray[700]} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [isOwnProfile, navigation]);
+
+  // ─── Data Loading ────────────────────────────────────────────────────────────
+
+  const loadUserData = useCallback(async () => {
+    try {
+      const userDoc = await firestore()
+        .collection(COLLECTIONS.USERS)
+        .doc(userId)
+        .get();
+
+      if (userDoc.exists()) {
+        setUser({ id: userDoc.id, ...(userDoc.data() as Omit<User, 'id'>) });
+        setAvatarError(false);
+      }
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      showToast('Failed to load profile', 'error');
+    }
+  }, [userId, showToast]);
+
+  const loadUserPosts = useCallback(async () => {
+    try {
+      const snapshot = await firestore()
+        .collection(COLLECTIONS.POSTS)
+        .where('userId', '==', userId)
+        .orderBy('createdAt', 'desc')
+        .limit(20)
+        .get();
+
+      const loadedPosts: PostType[] = await Promise.all(
+        snapshot.docs.map(async doc => {
+          const data = doc.data();
+
+          // Fetch author data
+          let postUser: User = user ?? ({} as User);
+          if (!user) {
+            const authorDoc = await firestore()
+              .collection(COLLECTIONS.USERS)
+              .doc(data.userId)
+              .get();
+            if (authorDoc.exists()) {
+              postUser = { id: authorDoc.id, ...authorDoc.data() } as User;
+            }
+          }
+
+          return {
+            id: doc.id,
+            ...data,
+            user: postUser,
+            createdAt: data.createdAt?.toDate?.() ?? new Date(),
+            updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
+          } as PostType;
+        })
+      );
+
+      setPosts(loadedPosts);
+    } catch (error) {
+      console.error('Error loading user posts:', error);
+    }
+  }, [userId, user]);
+
+  const loadRelationshipStatus = useCallback(async () => {
+    if (!currentUserId || currentUserId === userId) return;
+    try {
+      const status = await getRelationshipStatus(userId);
+      setRelationshipStatus(status);
+
+      if (status === 'request_received') {
+        const reqId = await getReceivedRequestId(userId);
+        setReceivedRequestId(reqId);
+      } else {
+        setReceivedRequestId(null);
+      }
+    } catch (error) {
+      console.error('Error loading relationship status:', error);
+    }
+  }, [currentUserId, userId, getRelationshipStatus, getReceivedRequestId]);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([loadUserData(), loadRelationshipStatus()]);
+    setLoading(false);
+  }, [loadUserData, loadRelationshipStatus]);
 
   useEffect(() => {
-    // Simulate API call to load user data
-    const loadUserData = () => {
-      const foundUser = MOCK_USERS.find(u => u.id === userId);
-      const userPosts = MOCK_USER_POSTS[userId] || [];
+    loadAll();
+  }, [loadAll]);
 
-      console.log("Found User: ", foundUser);
-      
-      if (foundUser) {
-        setUser(foundUser);
-        setPosts(userPosts);
-        // Simulate checking if current user follows this user
-        setIsFollowing(Math.random() > 0.5);
+  // Load posts after user data is set
+  useEffect(() => {
+    if (user) {
+      loadUserPosts();
+    }
+  }, [user, loadUserPosts]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadUserData(), loadRelationshipStatus(), loadUserPosts()]);
+    setRefreshing(false);
+  }, [loadUserData, loadRelationshipStatus, loadUserPosts]);
+
+  // ─── Companion Actions ────────────────────────────────────────────────────────
+
+  const handleCompanionPress = useCallback(async () => {
+    if (!user || companionLoading) return;
+    setCompanionLoading(true);
+
+    try {
+      switch (relationshipStatus) {
+        case 'none':
+          await sendRequest(userId);
+          setRelationshipStatus('request_sent');
+          break;
+
+        case 'request_sent':
+          Alert.alert(
+            'Cancel Request',
+            `Cancel your companion request to ${user.name}?`,
+            [
+              { text: 'Keep', style: 'cancel' },
+              {
+                text: 'Cancel Request',
+                style: 'destructive',
+                onPress: async () => {
+                  await cancelRequest(userId);
+                  setRelationshipStatus('none');
+                },
+              },
+            ]
+          );
+          break;
+
+        case 'request_received':
+          // Show Accept/Decline sheet
+          Alert.alert(
+            'Companion Request',
+            `${user.name} wants to be your companion`,
+            [
+              { text: 'Decline', style: 'destructive', onPress: handleDeclineRequest },
+              { text: 'Accept', onPress: handleAcceptRequest },
+            ]
+          );
+          break;
+
+        case 'companions':
+          Alert.alert(
+            'Remove Companion',
+            `Remove ${user.name} as a companion?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Remove',
+                style: 'destructive',
+                onPress: async () => {
+                  await removeCompanion(userId);
+                  setRelationshipStatus('none');
+                },
+              },
+            ]
+          );
+          break;
       }
-      setLoading(false);
-    };
+    } finally {
+      setCompanionLoading(false);
+    }
+  }, [
+    user,
+    userId,
+    companionLoading,
+    relationshipStatus,
+    sendRequest,
+    cancelRequest,
+    removeCompanion,
+  ]);
 
-    setTimeout(loadUserData, 500);
-  }, [userId]);
+  const handleAcceptRequest = useCallback(async () => {
+    if (!receivedRequestId) return;
+    setCompanionLoading(true);
+    try {
+      await acceptRequest(receivedRequestId);
+      setRelationshipStatus('companions');
+      setReceivedRequestId(null);
+    } finally {
+      setCompanionLoading(false);
+    }
+  }, [receivedRequestId, acceptRequest]);
 
-  const handleFollowToggle = useCallback(async () => {
-    if (!user) return;
-    
-    setIsFollowingLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setIsFollowing(prev => {
-        const newFollowing = !prev;
-        setUser(prevUser => prevUser ? {
-          ...prevUser,
-          followerCount: prevUser.followerCount + (newFollowing ? 1 : -1)
-        } : null);
-        return newFollowing;
-      });
-      setIsFollowingLoading(false);
-    }, 500);
-  }, [user]);
+  const handleDeclineRequest = useCallback(async () => {
+    if (!receivedRequestId) return;
+    setCompanionLoading(true);
+    try {
+      await rejectRequest(receivedRequestId);
+      setRelationshipStatus('none');
+      setReceivedRequestId(null);
+    } finally {
+      setCompanionLoading(false);
+    }
+  }, [receivedRequestId, rejectRequest]);
 
-  const { showToast } = useToast();
+  // ─── Companion Button ─────────────────────────────────────────────────────────
+
+  const companionButtonLabel = () => {
+    switch (relationshipStatus) {
+      case 'none':           return 'Add Companion';
+      case 'request_sent':   return 'Request Sent';
+      case 'request_received': return 'Respond';
+      case 'companions':     return 'Companions';
+    }
+  };
+
+  const companionButtonVariant = (): 'primary' | 'outline' => {
+    switch (relationshipStatus) {
+      case 'none':
+      case 'request_received':
+        return 'primary';
+      case 'request_sent':
+      case 'companions':
+        return 'outline';
+    }
+  };
+
+  // ─── Message ──────────────────────────────────────────────────────────────────
 
   const handleMessage = useCallback(async () => {
     if (!user) return;
-
     try {
-      // Get or create conversation with this user
       const conversation = await messagingService.getOrCreateConversation(
-        'mock-user-id', // Current user (TODO: Replace with actual user ID from auth store)
-        user.id // Other user
+        currentUserId,
+        user.id
       );
-
-      // Navigate to chat
       navigation.navigate('ChatScreen', {
         conversationId: conversation.id,
         otherUserId: user.id,
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to open conversation';
-      showToast(errorMessage, 'error');
+      showToast('Failed to open conversation', 'error');
     }
-  }, [user, navigation, showToast]);
+  }, [user, currentUserId, navigation, showToast]);
 
-  const handleLike = useCallback((postId: string) => {
-    setPosts(prev => prev.map(post => {
-      if (post.id === postId) {
-        const isLiked = post.likes.includes('current-user-123');
-        return {
-          ...post,
-          likes: isLiked 
-            ? post.likes.filter(id => id !== 'current-user-123')
-            : [...post.likes, 'current-user-123']
-        };
-      }
-      return post;
-    }));
-  }, []);
+  // ─── Post handlers ────────────────────────────────────────────────────────────
 
-  const handleComment = useCallback((postId: string) => {
-    const post = posts.find(p => p.id === postId);
-    if (post) {
-      navigation.navigate('PostDetail', { post });
-    }
-  }, [navigation, posts]);
+  const handleComment = useCallback(
+    (postId: string) => {
+      const post = posts.find(p => p.id === postId);
+      if (post) navigation.navigate('PostDetail', { post });
+    },
+    [navigation, posts]
+  );
 
-  const handleShare = useCallback((postId: string) => {
-    console.log('Share post:', postId);
-  }, []);
+  const handleShare = useCallback((_postId: string) => {}, []);
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  }, []);
-
-  const handleMorePress = () => {
-    setShowActionSheet(true);
-  };
+  // ─── Moderation ───────────────────────────────────────────────────────────────
 
   const handleBlockUser = useCallback(async () => {
     if (!user) return;
-
     Alert.alert(
       'Block User',
-      `Are you sure you want to block ${user.name}? They won't be able to see your posts or send you messages.`,
+      `Are you sure you want to block ${user.name}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -238,7 +360,7 @@ const ProfileView = () => {
               await blockUser(user.id);
               showToast(`${user.name} has been blocked`, 'success');
               navigation.goBack();
-            } catch (error) {
+            } catch {
               showToast('Failed to block user', 'error');
             }
           },
@@ -247,12 +369,34 @@ const ProfileView = () => {
     );
   }, [user, blockUser, showToast, navigation]);
 
+  const handleToggleMute = useCallback(async () => {
+    if (!user) return;
+    const muted = isUserMuted(user.id);
+    try {
+      if (muted) {
+        await unmuteUser(user.id);
+        showToast(`${user.name} unmuted`, 'success');
+      } else {
+        await muteUser(user.id);
+        showToast(`${user.name} muted — their posts and comments will be hidden`, 'success');
+      }
+    } catch {
+      showToast('Failed to update mute status', 'error');
+    }
+  }, [user, isUserMuted, muteUser, unmuteUser, showToast]);
+
   const getActionSheetOptions = (): ActionSheetOption[] => {
+    const muted = user ? isUserMuted(user.id) : false;
     return [
       {
         label: 'Report User',
         icon: 'flag',
         onPress: () => setShowReportModal(true),
+      },
+      {
+        label: muted ? 'Unmute User' : 'Mute User',
+        icon: muted ? 'volume-high' : 'volume-xmark',
+        onPress: handleToggleMute,
       },
       {
         label: 'Block User',
@@ -263,119 +407,205 @@ const ProfileView = () => {
     ];
   };
 
-  const renderPost = useCallback(({ item }: { item: PostType }) => (
-    <TouchableOpacity 
-      activeOpacity={0.95}
-      onPress={() => navigation.navigate('PostDetail', { post: item })}
-    >
-      <Post
-        post={item}
-        onLike={handleLike}
-        onComment={handleComment}
-        onShare={handleShare}
-      />
-    </TouchableOpacity>
-  ), [handleLike, handleComment, handleShare, navigation]);
+  // ─── Render ───────────────────────────────────────────────────────────────────
+
+  const handleDeletePost = useCallback((postId: string) => {
+    setPosts(prev => prev.filter(p => p.id !== postId));
+  }, []);
+
+  const renderPost = useCallback(
+    ({ item }: { item: PostType }) => (
+      <TouchableOpacity
+        activeOpacity={0.95}
+        onPress={() => navigation.navigate('PostDetail', { post: item })}
+      >
+        <Post
+          post={item}
+          onComment={handleComment}
+          onShare={handleShare}
+          currentUserId={currentUserId}
+          onDelete={handleDeletePost}
+        />
+      </TouchableOpacity>
+    ),
+    [handleComment, handleShare, currentUserId, navigation, handleDeletePost]
+  );
 
   const renderHeader = () => {
     if (!user) return null;
 
     return (
       <View style={styles.profileContent}>
-        {/* Header with back button */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity 
-            onPress={() => navigation.goBack()}
-            style={styles.backButton}
-          >
-            <Icon name="arrow-left" size={20} color={theme.colors.gray[700]} />
-          </TouchableOpacity>
-          <Text variant="h3" weight="semibold" style={styles.headerTitle}>
-            {user.name}
-          </Text>
-          <TouchableOpacity style={styles.moreButton} onPress={handleMorePress}>
-            <Icon name="ellipsis" size={20} color={theme.colors.gray[700]} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Profile Header */}
+        {/* Avatar + info */}
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
-            {user.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.avatar} />
+            {user.avatar && !avatarError ? (
+              <Image
+                source={{ uri: user.avatar }}
+                style={styles.avatar}
+                onError={() => setAvatarError(true)}
+              />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Text variant="h2" color="white" weight="bold">
-                  {user.name.split(' ').map(n => n[0]).join('')}
-                </Text>
+                <Icon name="user" size={36} color={theme.colors.white} />
               </View>
             )}
           </View>
-          
+
           <View style={styles.userInfo}>
             <View style={styles.userNameRow}>
               <Text variant="h3" style={styles.userName}>
                 {user.name}
               </Text>
               {user.isVerified && (
-                <Icon name="badge-check" size={20} color={theme.colors.primary[500]} />
+                <Icon
+                  name="badge-check"
+                  size={20}
+                  color={theme.colors.primary[500]}
+                />
               )}
             </View>
-            {user.location && (
+            {user.username ? (
+              <Text variant="caption" color="gray.500" style={styles.handleText}>
+                @{user.username}
+              </Text>
+            ) : null}
+            <LevelBadge
+              points={user.pointsBalance ?? 0}
+              userId={userId}
+              style={styles.levelBadge}
+            />
+            {user.location ? (
               <View style={styles.locationRow}>
-                <Icon name="location-dot" size={14} color={theme.colors.gray[500]} />
-                <Text variant="caption" color="gray.500" style={styles.locationText}>
+                <Icon
+                  name="location-dot"
+                  size={14}
+                  color={theme.colors.gray[500]}
+                />
+                <Text
+                  variant="caption"
+                  color="gray.500"
+                  style={styles.locationText}
+                >
                   {user.location}
                 </Text>
               </View>
-            )}
+            ) : null}
           </View>
         </View>
 
-        {/* Bio Section */}
-        {user.bio && (
+        {/* Bio */}
+        {user.bio ? (
           <View style={styles.bioSection}>
             <Text variant="body" style={styles.bioText}>
               {user.bio}
             </Text>
-            
-            {user.website && (
+            {user.website ? (
               <TouchableOpacity style={styles.websiteLink}>
-                <Icon name="link" size={14} color={theme.colors.primary[500]} />
-                <Text variant="body" color="primary.500" style={styles.websiteText}>
+                <Icon
+                  name="link"
+                  size={14}
+                  color={theme.colors.primary[500]}
+                />
+                <Text
+                  variant="body"
+                  color="primary.500"
+                  style={styles.websiteText}
+                >
                   {user.website}
                 </Text>
               </TouchableOpacity>
-            )}
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* Action Buttons — only show for other users */}
+        {!isOwnProfile && (
+          <View style={styles.actions}>
+            {/* Message icon button */}
+            <TouchableOpacity
+              style={[styles.actionBtnIcon, styles.actionBtnOutline]}
+              onPress={handleMessage}
+              activeOpacity={0.75}
+            >
+              <Icon name="message" size={17} color={theme.colors.primary[500]} />
+            </TouchableOpacity>
+
+            {/* Companion button */}
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                companionButtonVariant() === 'primary'
+                  ? styles.actionBtnPrimary
+                  : styles.actionBtnOutline,
+              ]}
+              onPress={handleCompanionPress}
+              disabled={companionLoading}
+              activeOpacity={0.75}
+            >
+              {companionLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color={companionButtonVariant() === 'primary' ? theme.colors.white : theme.colors.primary[500]}
+                />
+              ) : (
+                <>
+                  <Icon
+                    name={
+                      relationshipStatus === 'companions' ? 'user-check' :
+                      relationshipStatus === 'request_sent' ? 'user-clock' :
+                      'user-plus'
+                    }
+                    size={14}
+                    color={companionButtonVariant() === 'primary' ? theme.colors.white : theme.colors.primary[500]}
+                  />
+                  <Text style={[
+                    styles.actionBtnText,
+                    companionButtonVariant() === 'primary' ? styles.actionBtnTextPrimary : styles.actionBtnTextOutline,
+                  ]}>
+                    {companionButtonLabel()}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Follow button */}
+            <TouchableOpacity
+              style={[
+                styles.actionBtn,
+                isFollowingUser ? styles.actionBtnOutline : styles.actionBtnPrimary,
+              ]}
+              onPress={toggleFollow}
+              disabled={followLoading}
+              activeOpacity={0.75}
+            >
+              {followLoading ? (
+                <ActivityIndicator size="small" color={isFollowingUser ? theme.colors.primary[500] : theme.colors.white} />
+              ) : (
+                <>
+                  <Icon
+                    name={isFollowingUser ? 'user-check' : 'user-plus'}
+                    size={14}
+                    color={isFollowingUser ? theme.colors.primary[500] : theme.colors.white}
+                  />
+                  <Text style={[
+                    styles.actionBtnText,
+                    isFollowingUser ? styles.actionBtnTextOutline : styles.actionBtnTextPrimary,
+                  ]}>
+                    {isFollowingUser ? 'Following' : 'Follow'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
           </View>
         )}
 
-        {/* Action Buttons */}
-        <View style={styles.actions}>
-          <Button
-            variant={isFollowing ? "outline" : "primary"}
-            onPress={handleFollowToggle}
-            disabled={isFollowingLoading}
-            style={styles.followButton}
-          >
-            {isFollowingLoading ? (
-              <ActivityIndicator size="small" color={isFollowing ? theme.colors.primary[500] : theme.colors.white} />
-            ) : (
-              isFollowing ? "Following" : "Add Companion"
-            )}
-          </Button>
-          <Button
-            variant="outline"
-            onPress={handleMessage}
-            style={styles.messageButton}
-          >
-            Message
-          </Button>
-        </View>
-
-        {/* Posts Header */}
+        {/* Posts header */}
         <View style={styles.postsHeader}>
-          <Text variant="h4" weight="semibold">Posts</Text>
+          <Text variant="h4" weight="semibold">
+            Posts
+          </Text>
           <Text variant="caption" color="gray.500">
             {posts.length} post{posts.length !== 1 ? 's' : ''}
           </Text>
@@ -398,11 +628,11 @@ const ProfileView = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.colors.primary[500]} />
           <Text variant="body" color="gray.500" style={styles.loadingText}>
-            Loading profile...
+            Loading profile…
           </Text>
         </View>
       </SafeAreaView>
@@ -411,17 +641,19 @@ const ProfileView = () => {
 
   if (!user) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.errorContainer}>
           <Icon name="user-slash" size={48} color={theme.colors.error[500]} />
-          <Text variant="h4" color="error.500">User not found</Text>
+          <Text variant="h4" color="error.500">
+            User not found
+          </Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <FlatList
         data={posts}
         renderItem={renderPost}
@@ -439,14 +671,12 @@ const ProfileView = () => {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Action Sheet */}
       <ActionSheet
         visible={showActionSheet}
         onClose={() => setShowActionSheet(false)}
         options={getActionSheetOptions()}
       />
 
-      {/* Report Modal */}
       {user && (
         <ReportModal
           visible={showReportModal}
@@ -454,9 +684,7 @@ const ProfileView = () => {
           reportedId={user.id}
           reportedType="user"
           reportedUserId={user.id}
-          contentSnapshot={{
-            userName: user.name,
-          }}
+          contentSnapshot={{ userName: user.name }}
         />
       )}
     </SafeAreaView>
@@ -473,33 +701,7 @@ const styles = StyleSheet.create({
   },
   profileContent: {
     paddingHorizontal: theme.spacing.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: theme.spacing.md,
-    marginBottom: theme.spacing.md,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.gray[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-  },
-  moreButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.gray[100],
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingTop: theme.spacing.md,
   },
   profileHeader: {
     flexDirection: 'row',
@@ -528,15 +730,21 @@ const styles = StyleSheet.create({
   userNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.xs,
+    marginBottom: 0,
   },
   userName: {
     marginRight: theme.spacing.xs,
   },
+  handleText: {
+    marginTop: 1,
+  },
+  levelBadge: {
+    marginTop: 3,
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing.xs,
+    marginTop: 2,
   },
   locationText: {
     marginLeft: theme.spacing.xs,
@@ -555,27 +763,45 @@ const styles = StyleSheet.create({
   websiteText: {
     marginLeft: theme.spacing.xs,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.lg,
-    paddingVertical: theme.spacing.lg,
-    marginBottom: theme.spacing.lg,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
   actions: {
     flexDirection: 'row',
     marginBottom: theme.spacing.xl,
     gap: theme.spacing.sm,
   },
-  followButton: {
-    flex: 2,
-  },
-  messageButton: {
+  actionBtn: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 38,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.sm,
+  },
+  actionBtnIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnPrimary: {
+    backgroundColor: theme.colors.primary[500],
+  },
+  actionBtnOutline: {
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary[400],
+    backgroundColor: 'transparent',
+  },
+  actionBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  actionBtnTextPrimary: {
+    color: theme.colors.white,
+  },
+  actionBtnTextOutline: {
+    color: theme.colors.primary[600],
   },
   postsHeader: {
     flexDirection: 'row',
@@ -593,6 +819,12 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: theme.spacing.md,
+  },
+  notFoundHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
   },
   errorContainer: {
     flex: 1,

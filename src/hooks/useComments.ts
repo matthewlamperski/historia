@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { Comment, CreateCommentData } from '../types';
 import { postsService } from '../services/postsService';
 import { useToast } from './useToast';
+import { useModeration } from '../context/ModerationContext';
+import { useAuthStore } from '../store/authStore';
 
 export interface UseCommentsReturn {
   comments: Comment[];
@@ -16,16 +18,18 @@ export const useComments = (): UseCommentsReturn => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const { showToast } = useToast();
+  const { mutedUserIds } = useModeration();
+  const { user } = useAuthStore();
 
   const loadComments = useCallback(async (postId: string) => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const postComments = await postsService.getComments(postId, 50);
-      setComments(postComments);
+      setComments(postComments.filter(c => !mutedUserIds.includes(c.userId)));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load comments';
       setError(errorMessage);
@@ -33,13 +37,12 @@ export const useComments = (): UseCommentsReturn => {
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, mutedUserIds]);
 
   const createComment = useCallback(async (commentData: CreateCommentData) => {
     try {
-      // For now, we'll use a mock user ID. In a real app, this would come from auth
-      const userId = 'mock-user-1';
-      
+      const userId = user?.id ?? '';
+
       const newComment = await postsService.createComment(commentData, userId);
       setComments(prev => [newComment, ...prev]);
       showToast('Comment added successfully!', 'success');
@@ -48,7 +51,7 @@ export const useComments = (): UseCommentsReturn => {
       showToast(errorMessage, 'error');
       throw err;
     }
-  }, [showToast]);
+  }, [user?.id, showToast]);
 
   const refreshComments = useCallback(async (postId: string) => {
     await loadComments(postId);

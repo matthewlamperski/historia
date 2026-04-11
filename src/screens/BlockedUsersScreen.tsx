@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   Image,
   ActivityIndicator,
   Alert,
@@ -24,7 +23,7 @@ interface BlockedUserItem extends Block {
 
 export const BlockedUsersScreen: React.FC<
   RootStackScreenProps<'BlockedUsers'>
-> = ({ navigation }) => {
+> = () => {
   const { blockedUsers, unblockUser, isLoading: moderationLoading } = useModeration();
   const { showToast } = useToast();
 
@@ -170,21 +169,7 @@ export const BlockedUsersScreen: React.FC<
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        >
-          <Icon name="arrow-left" size={20} color={theme.colors.gray[700]} />
-        </TouchableOpacity>
-        <Text variant="h3" weight="semibold">
-          Blocked Users
-        </Text>
-        <View style={styles.backButton} />
-      </View>
-
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* Description */}
       <View style={styles.description}>
         <Text variant="body" color="gray.600">
@@ -219,23 +204,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[200],
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.gray[100],
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   description: {
     paddingHorizontal: theme.spacing.lg,

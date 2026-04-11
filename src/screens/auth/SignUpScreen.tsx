@@ -15,6 +15,7 @@ import { theme } from '../../constants/theme';
 import { useAuth } from '../../hooks';
 import { AuthStackScreenProps } from '../../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const logoLong = require('../../assets/logolong.png');
 
@@ -26,6 +27,8 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState('');
+  const [showReferralInput, setShowReferralInput] = useState(false);
 
   const {
     signUpWithEmail,
@@ -81,6 +84,12 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
     }
 
     try {
+      // If user entered a referral code manually, store it so useAuth can apply it after sign-up
+      const trimmedCode = referralCode.trim().toUpperCase();
+      if (trimmedCode) {
+        await AsyncStorage.setItem('pendingReferralCode', trimmedCode);
+      }
+
       await signUpWithEmail(email.trim(), password, displayName.trim());
     } catch (e) {
       // Error is handled in the store
@@ -205,6 +214,40 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
               <Icon name="lock" size={18} color={theme.colors.gray[400]} />
             }
           />
+
+          {/* Referral Code (collapsible) */}
+          <TouchableOpacity
+            style={styles.referralToggle}
+            onPress={() => setShowReferralInput(prev => !prev)}
+            activeOpacity={0.7}
+          >
+            <Icon
+              name="gift"
+              size={15}
+              color={theme.colors.primary[500]}
+            />
+            <Text variant="caption" color="primary.500" weight="medium" style={styles.referralToggleText}>
+              Got a referral code?
+            </Text>
+            <Icon
+              name={showReferralInput ? 'chevron-up' : 'chevron-down'}
+              size={12}
+              color={theme.colors.primary[500]}
+            />
+          </TouchableOpacity>
+          {showReferralInput && (
+            <Input
+              placeholder="Enter referral code (e.g. A3X7KP2Q)"
+              value={referralCode}
+              onChangeText={text => setReferralCode(text.toUpperCase())}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              containerStyle={styles.inputContainer}
+              leftIcon={
+                <Icon name="ticket" size={16} color={theme.colors.gray[400]} />
+              }
+            />
+          )}
 
           {/* Sign Up Button */}
           <Button
@@ -369,6 +412,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     marginTop: 'auto',
+  },
+  atSymbol: {
+    color: theme.colors.gray[500],
+    fontWeight: theme.fontWeight.semibold,
+  },
+  referralToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  referralToggleText: {
+    marginRight: 2,
   },
 });
 

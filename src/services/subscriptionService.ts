@@ -87,10 +87,19 @@ export const subscriptionService = {
     if (!record) {
       return false;
     }
-    return (
-      record.status === 'active' ||
-      record.status === 'trial'
-    );
+    if (record.status === 'active' || record.status === 'trial') {
+      return true;
+    }
+    // Referral bonus — grants premium access until expiry date
+    if (record.referralBonusExpiry) {
+      return new Date(record.referralBonusExpiry) > new Date();
+    }
+    return false;
+  },
+
+  hasActiveReferralBonus(record: SubscriptionRecord | null): boolean {
+    if (!record?.referralBonusExpiry) return false;
+    return new Date(record.referralBonusExpiry) > new Date();
   },
 
   isTrialActive(record: SubscriptionRecord | null): boolean {

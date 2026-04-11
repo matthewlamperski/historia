@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,15 +8,32 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SwipeListView } from 'react-native-swipe-list-view';
-import { Text, ConversationListItem } from '../components/ui';
+import { Text, ConversationListItem, ActionSheet } from '../components/ui';
+import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useConversations } from '../hooks';
 import { TabScreenProps } from '../types';
 import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
-
-const MOCK_USER_ID = 'mock-user-id'; // TODO: Replace with actual user ID from auth store
+import { useAuthStore } from '../store/authStore';
 
 const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
+  const { user } = useAuthStore();
+  const currentUserId = user?.id ?? '';
+  const [showComposeSheet, setShowComposeSheet] = useState(false);
+
+  const composeOptions: ActionSheetOption[] = [
+    {
+      label: 'New Message',
+      icon: 'comment',
+      onPress: () => (navigation as any).navigate('NewConversation'),
+    },
+    {
+      label: 'New Group',
+      icon: 'users',
+      onPress: () => (navigation as any).navigate('NewGroup'),
+    },
+  ];
+
   const {
     conversations,
     loading,
@@ -27,14 +44,24 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
     refreshConversations,
     markAsRead,
     deleteConversation,
-  } = useConversations(MOCK_USER_ID);
+  } = useConversations(currentUserId);
 
   const handleConversationPress = useCallback(
     (conversationId: string) => {
       markAsRead(conversationId);
-      (navigation as any).navigate('ChatScreen', { conversationId });
+      const conversation = conversations.find(c => c.id === conversationId);
+      const otherUser = conversation?.type !== 'group'
+        ? conversation?.participantDetails.find(p => p.id !== currentUserId)
+        : undefined;
+      (navigation as any).navigate('ChatScreen', {
+        conversationId,
+        otherUserId: otherUser?.id,
+        otherUserName: otherUser?.name,
+        otherUserAvatar: otherUser?.avatar,
+        otherUserUsername: otherUser?.username,
+      });
     },
-    [navigation, markAsRead]
+    [navigation, markAsRead, conversations, currentUserId]
   );
 
   const handleLoadMore = useCallback(() => {
@@ -55,7 +82,7 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
       <View style={styles.rowFront}>
         <ConversationListItem
           conversation={item}
-          currentUserId={MOCK_USER_ID}
+          currentUserId={currentUserId}
           onPress={handleConversationPress}
         />
       </View>
@@ -106,7 +133,7 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
           No Messages Yet
         </Text>
         <Text variant="body" color="gray.500" style={styles.emptyText}>
-          Start a conversation from a user's profile
+          Search for a handle to start a conversation
         </Text>
       </View>
     );
@@ -127,6 +154,18 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <Text variant="h2">Messages</Text>
+        <TouchableOpacity
+          style={styles.composeBtn}
+          onPress={() => setShowComposeSheet(true)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <FontAwesome6
+            name="pen-to-square"
+            size={20}
+            color={theme.colors.primary[500]}
+            iconStyle="regular"
+          />
+        </TouchableOpacity>
       </View>
 
       {/* Conversation list */}
@@ -163,6 +202,13 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
           </Text>
         </View>
       )}
+
+      {/* Compose action sheet */}
+      <ActionSheet
+        visible={showComposeSheet}
+        onClose={() => setShowComposeSheet(false)}
+        options={composeOptions}
+      />
     </SafeAreaView>
   );
 };
@@ -173,10 +219,16 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.white,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.gray[200],
+  },
+  composeBtn: {
+    padding: theme.spacing.xs,
   },
   centerContainer: {
     flex: 1,

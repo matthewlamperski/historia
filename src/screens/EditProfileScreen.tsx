@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import ImageCropPicker from 'react-native-image-crop-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Text } from '../components/ui';
@@ -19,39 +20,54 @@ import { RootStackScreenProps } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useAuthStore } from '../store/authStore';
 import { userService } from '../services/userService';
-import { useImagePicker } from '../hooks/useImagePicker';
 
 const FIELD_MAX = { name: 60, bio: 160, location: 80, website: 120 };
 
 export const EditProfileScreen = () => {
   const navigation = useNavigation<RootStackScreenProps<'EditProfile'>['navigation']>();
   const { user, updateUser } = useAuthStore();
-  const { selectedImages, pickImages, clearImages } = useImagePicker();
 
   const [name, setName] = useState(user?.name ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
   const [location, setLocation] = useState(user?.location ?? '');
   const [website, setWebsite] = useState(user?.website ?? '');
-  const [avatar, setAvatar] = useState(user?.avatar ?? '');
+  // Tracks the currently displayed avatar URI — may be a remote URL or a new local URI
+  const [avatarUri, setAvatarUri] = useState(user?.avatar ?? '');
+  // pendingLocalUri + pendingBase64 are set when user picks a new image; cleared after upload on save
+  const [pendingLocalUri, setPendingLocalUri] = useState<string | null>(null);
+  const [pendingBase64, setPendingBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // When image picker resolves, grab the latest selection
-  useEffect(() => {
-    if (selectedImages.length > 0) {
-      setAvatar(selectedImages[selectedImages.length - 1]);
-      clearImages();
-    }
-  }, [selectedImages, clearImages]);
+  const handlePickAvatar = useCallback(async () => {
+    try {
+      const image = await ImageCropPicker.openPicker({
+        mediaType: 'photo',
+        width: 400,
+        height: 400,
+        cropping: true,
+        cropperCircleOverlay: true,
+        includeBase64: true,
+        compressImageQuality: 0.85,
+        cropperToolbarTitle: 'Crop Profile Photo',
+      });
 
-  const handlePickAvatar = useCallback(() => {
-    pickImages();
-  }, [pickImages]);
+      // path may or may not have file:// prefix — normalise for <Image>
+      const uri = image.path.startsWith('file://') ? image.path : `file://${image.path}`;
+      setAvatarUri(uri);
+      setPendingLocalUri(uri);
+      setPendingBase64(image.data ?? null);
+    } catch (err: any) {
+      // User cancelled — not an error
+      if (err?.code === 'E_PICKER_CANCELLED') return;
+      console.error('Image picker error:', err);
+      Alert.alert('Error', 'Could not open photo library. Please try again.');
+    }
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!user?.id) return;
 
     const trimmedName = name.trim();
-
     if (!trimmedName) {
       Alert.alert('Required', 'Name cannot be empty.');
       return;
@@ -59,19 +75,25 @@ export const EditProfileScreen = () => {
 
     setSaving(true);
     try {
+      let resolvedAvatarUrl = user.avatar ?? '';
+
+      // Upload new avatar to Storage if user picked one
+      if (pendingLocalUri) {
+        resolvedAvatarUrl = await userService.uploadAvatar(user.id, pendingLocalUri, pendingBase64);
+      }
+
       const updates = {
         name: trimmedName,
         bio: bio.trim(),
         location: location.trim(),
         website: website.trim(),
-        ...(avatar !== user.avatar ? { avatar } : {}),
+        ...(resolvedAvatarUrl !== user.avatar ? { avatar: resolvedAvatarUrl } : {}),
       };
 
       await userService.updateUserProfile(user.id, updates);
-
-      // Sync Zustand so the rest of the app sees changes immediately
       updateUser(updates);
-
+      setPendingLocalUri(null);
+      setPendingBase64(null);
       navigation.goBack();
     } catch (error) {
       console.error('Error saving profile:', error);
@@ -79,37 +101,26 @@ export const EditProfileScreen = () => {
     } finally {
       setSaving(false);
     }
-  }, [user, name, bio, location, website, avatar, updateUser, navigation]);
+  }, [user, name, bio, location, website, pendingLocalUri, pendingBase64, updateUser, navigation]);
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.headerBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Icon name="chevron-left" size={22} color={theme.colors.gray[900]} />
-        </TouchableOpacity>
-        <Text variant="h4" weight="semibold" style={styles.headerTitle}>
-          Edit Profile
-        </Text>
-        <TouchableOpacity
-          onPress={handleSave}
-          style={[styles.headerBtn, styles.saveBtn]}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={theme.colors.white} />
-          ) : (
-            <Text variant="label" weight="semibold" style={styles.saveBtnText}>
+  useEffect(() => {
+    navigation.setOptions({
+      title: 'Edit Profile',
+      headerRight: () =>
+        saving ? (
+          <ActivityIndicator size="small" color={theme.colors.primary[500]} style={{ marginRight: 4 }} />
+        ) : (
+          <TouchableOpacity onPress={handleSave} disabled={saving} style={{ marginRight: 4 }}>
+            <Text variant="label" weight="semibold" style={{ color: theme.colors.primary[500] }}>
               Save
             </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          </TouchableOpacity>
+        ),
+    });
+  }, [saving, handleSave, navigation]);
 
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -121,14 +132,16 @@ export const EditProfileScreen = () => {
           showsVerticalScrollIndicator={false}
         >
           {/* Avatar */}
-          <TouchableOpacity style={styles.avatarSection} onPress={handlePickAvatar}>
-            {avatar ? (
-              <Image source={{ uri: avatar }} style={styles.avatar} />
+          <TouchableOpacity style={styles.avatarSection} onPress={handlePickAvatar} disabled={saving}>
+            {avatarUri ? (
+              <Image
+                source={{ uri: avatarUri }}
+                style={styles.avatar}
+                onError={() => setAvatarUri('')}
+              />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Text variant="h2" color="white" weight="bold">
-                  {(name || '?').charAt(0).toUpperCase()}
-                </Text>
+                <Icon name="user" size={40} color={theme.colors.white} />
               </View>
             )}
             <View style={styles.avatarEditBadge}>
@@ -138,6 +151,26 @@ export const EditProfileScreen = () => {
               Change Photo
             </Text>
           </TouchableOpacity>
+
+          {/* Handle (locked) */}
+          {user?.username ? (
+            <View style={styles.fields}>
+              <View style={handleStyles.wrap}>
+                <Text variant="label" weight="semibold" style={handleStyles.label}>
+                  Handle
+                </Text>
+                <View style={handleStyles.row}>
+                  <Text variant="body" style={handleStyles.value}>
+                    @{user.username}
+                  </Text>
+                  <Icon name="lock" size={14} color={theme.colors.gray[400]} />
+                </View>
+                <Text variant="caption" color="gray.400" style={handleStyles.note}>
+                  Handles cannot be changed
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* Fields */}
           <View style={styles.fields}>
@@ -294,38 +327,37 @@ const fieldStyles = StyleSheet.create({
   },
 });
 
+const handleStyles = StyleSheet.create({
+  wrap: {
+    marginBottom: theme.spacing.lg,
+  },
+  label: {
+    color: theme.colors.gray[700],
+    marginBottom: theme.spacing.xs,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: theme.colors.gray[200],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.gray[100],
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+  },
+  value: {
+    color: theme.colors.gray[600],
+  },
+  note: {
+    marginTop: 4,
+  },
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[100],
-  },
-  headerBtn: {
-    minWidth: 44,
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    color: theme.colors.gray[900],
-  },
-  saveBtn: {
-    backgroundColor: theme.colors.primary[500],
-    borderRadius: theme.borderRadius.full,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 34,
-  },
-  saveBtnText: {
-    color: theme.colors.white,
   },
   scroll: {
     flex: 1,

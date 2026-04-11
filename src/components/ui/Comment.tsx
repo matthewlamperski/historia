@@ -27,19 +27,14 @@ export const Comment: React.FC<CommentProps> = ({
   comment,
   onLike,
   onDelete,
-  currentUserId = 'mock-user-id',
+  currentUserId = '',
 }) => {
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const { showToast } = useToast();
 
-  const isLiked = comment.likes.includes(currentUserId);
   const isOwnComment = comment.userId === currentUserId;
-
-  const handleLike = () => {
-    onLike?.(comment.id);
-  };
 
   const handleLongPress = () => {
     setShowActionSheet(true);
@@ -128,24 +123,6 @@ export const Comment: React.FC<CommentProps> = ({
             <Text variant="caption" color="gray.500">
               {formatDistanceToNow(comment.createdAt)}
             </Text>
-
-            <TouchableOpacity style={styles.likeButton} onPress={handleLike}>
-              <Icon
-                name="heart"
-                size={12}
-                color={isLiked ? theme.colors.error[500] : theme.colors.gray[400]}
-                solid={isLiked}
-              />
-              {comment.likes.length > 0 && (
-                <Text
-                  variant="caption"
-                  color={isLiked ? 'error.500' : 'gray.400'}
-                  style={styles.likeCount}
-                >
-                  {comment.likes.length}
-                </Text>
-              )}
-            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -213,13 +190,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: theme.spacing.sm,
-  },
-  likeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: theme.spacing.md,
-  },
-  likeCount: {
-    marginLeft: theme.spacing.xs,
   },
 });

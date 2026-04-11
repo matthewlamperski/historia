@@ -13,6 +13,11 @@ export interface UseMessagesReturn {
     data: CreateMessageData,
     imageUris: string[]
   ) => Promise<void>;
+  sendMessageWithMedia: (
+    data: CreateMessageData,
+    imageUris: string[],
+    videoUris: string[]
+  ) => Promise<void>;
   loadMoreMessages: () => Promise<void>;
   toggleLike: (messageId: string) => Promise<void>;
   markAsRead: () => Promise<void>;
@@ -175,6 +180,56 @@ export const useMessages = (
     [conversationId, currentUserId, showToast]
   );
 
+  // Send message with images and/or videos
+  const sendMessageWithMedia = useCallback(
+    async (data: CreateMessageData, imageUris: string[], videoUris: string[]) => {
+      const tempMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversationId,
+        senderId: currentUserId,
+        sender: {
+          id: currentUserId,
+          name: 'You',
+          username: 'you',
+          email: '',
+          followerCount: 0,
+          followingCount: 0,
+          postCount: 0,
+          isVerified: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        text: data.text,
+        images: imageUris,
+        videos: videoUris,
+        postReference: data.postReference,
+        likes: [],
+        isEmojiOnly: false,
+        readBy: [currentUserId],
+        timestamp: new Date(),
+        updatedAt: new Date(),
+      };
+
+      setMessages(prev => [...prev, tempMessage]);
+
+      try {
+        await messagingService.sendMessageWithMedia(
+          data,
+          currentUserId,
+          imageUris,
+          videoUris
+        );
+      } catch (err) {
+        setMessages(prev => prev.filter(m => m.id !== tempMessage.id));
+        const errorMessage =
+          err instanceof Error ? err.message : 'Failed to send message';
+        showToast(errorMessage, 'error');
+        throw err;
+      }
+    },
+    [conversationId, currentUserId, showToast]
+  );
+
   // Toggle like on message
   const toggleLike = useCallback(
     async (messageId: string) => {
@@ -250,6 +305,7 @@ export const useMessages = (
     hasMore,
     sendMessage,
     sendMessageWithImages,
+    sendMessageWithMedia,
     loadMoreMessages,
     toggleLike,
     markAsRead,

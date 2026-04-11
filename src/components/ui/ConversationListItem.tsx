@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Text } from './Text';
+import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
 import { Conversation } from '../../types';
 import { theme } from '../../constants/theme';
 import { formatDistanceToNow } from '../../utils/formatters';
@@ -16,17 +17,24 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
   currentUserId,
   onPress,
 }) => {
+  const isGroup = conversation.type === 'group';
+
   // Get other participant (for direct messages)
-  const otherUser = conversation.participantDetails.find(
-    u => u.id !== currentUserId
-  );
+  const otherUser = isGroup
+    ? null
+    : conversation.participantDetails.find(u => u.id !== currentUserId);
 
   const unreadCount = conversation.unreadCount[currentUserId] || 0;
   const hasUnread = unreadCount > 0;
 
-  if (!otherUser) {
+  // For direct messages, bail if other user not found
+  if (!isGroup && !otherUser) {
     return null;
   }
+
+  const displayName = isGroup
+    ? (conversation.name ?? 'Group')
+    : otherUser!.name;
 
   return (
     <TouchableOpacity
@@ -36,12 +44,21 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
     >
       {/* Avatar */}
       <View style={styles.avatarContainer}>
-        {otherUser.avatar ? (
-          <Image source={{ uri: otherUser.avatar }} style={styles.avatar} />
+        {isGroup ? (
+          <View style={[styles.avatar, styles.groupAvatarPlaceholder]}>
+            <FontAwesome6
+              name="users"
+              size={20}
+              color={theme.colors.primary[500]}
+              iconStyle="solid"
+            />
+          </View>
+        ) : otherUser!.avatar ? (
+          <Image source={{ uri: otherUser!.avatar }} style={styles.avatar} />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarText}>
-              {otherUser.name.charAt(0).toUpperCase()}
+              {otherUser!.name.charAt(0).toUpperCase()}
             </Text>
           </View>
         )}
@@ -57,7 +74,7 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
             style={styles.name}
             numberOfLines={1}
           >
-            {otherUser.name}
+            {displayName}
           </Text>
           <Text variant="caption" color="gray.500" style={styles.timestamp}>
             {formatDistanceToNow(conversation.lastMessageTimestamp)}
@@ -65,6 +82,15 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
         </View>
 
         <View style={styles.messageRow}>
+          {conversation.lastMessageType === 'image' && (
+            <FontAwesome6
+              name="image"
+              size={12}
+              color={hasUnread ? theme.colors.gray[900] : theme.colors.gray[400]}
+              iconStyle="solid"
+              style={styles.mediaIcon}
+            />
+          )}
           <Text
             variant="body"
             color={hasUnread ? 'gray.900' : 'gray.600'}
@@ -73,7 +99,7 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
             numberOfLines={1}
           >
             {conversation.lastMessageSenderId === currentUserId && 'You: '}
-            {conversation.lastMessage}
+            {conversation.lastMessage || 'Say hello!'}
           </Text>
           {hasUnread && (
             <View style={styles.unreadBadge}>
@@ -107,6 +133,13 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary[500],
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  groupAvatarPlaceholder: {
+    backgroundColor: theme.colors.primary[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
   },
   avatarText: {
     color: theme.colors.white,
@@ -144,6 +177,10 @@ const styles = StyleSheet.create({
   messageRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+  },
+  mediaIcon: {
+    marginTop: 1,
   },
   lastMessage: {
     flex: 1,

@@ -30,4 +30,16 @@ export const COLLECTIONS = {
   SUBSCRIPTIONS: 'subscriptions',
   // Gratitude journal
   JOURNAL: 'journal',
+  // Notifications
+  NOTIFICATIONS: 'notifications',
+  // Referrals
+  REFERRALS: 'referrals',
+  // Mutes
+  MUTES: 'mutes',
+  // Follows: users/{userId}/following/{targetId}  &  users/{userId}/followers/{followerId}
+  FOLLOWING: 'following',
+  FOLLOWERS: 'followers',
+  // User subcollections: users/{userId}/{subcollection}/{docId}
+  BOOKMARKS: 'bookmarks',
+  VISITED: 'visited',
 } as const;

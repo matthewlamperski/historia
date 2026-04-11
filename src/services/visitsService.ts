@@ -11,6 +11,7 @@ import { COLLECTIONS } from './firebaseConfig';
 import { Visit, Landmark } from '../types';
 import { getDistance } from 'geolib';
 import { landmarksService } from './landmarksService';
+import { pointsService } from './pointsService';
 
 // Verification radius in meters (100m)
 const VERIFICATION_RADIUS = 100;
@@ -94,13 +95,14 @@ class VisitsService {
         .collection(COLLECTIONS.VISITS)
         .add(visitData);
 
-      // Update user's visited landmarks
+      // Record in user's visited subcollection (landmarkId as doc ID = natural deduplication)
       await firestore()
-        .collection(COLLECTIONS.USERS)
-        .doc(userId)
-        .update({
-          visitedLandmarks: firestore.FieldValue.arrayUnion(landmarkId),
-        });
+        .collection(COLLECTIONS.USERS).doc(userId)
+        .collection(COLLECTIONS.VISITED).doc(landmarkId)
+        .set({ landmarkId, visitedAt: now, createdAt: now }, { merge: true });
+
+      // Award points for the visit (non-blocking)
+      pointsService.awardPoints(userId, 20, 'site_visit').catch(console.error);
 
       return {
         id: docRef.id,
@@ -213,26 +215,37 @@ class VisitsService {
     }
   }
 
-  // Check if user has visited a landmark
+  // Check if user has visited a landmark (reads from subcollection — O(1))
   async hasVisited(userId: string, landmarkId: string): Promise<boolean> {
     if (!this.isFirebaseAvailable()) {
       await new Promise<void>(resolve => setTimeout(resolve, 100));
-      // Mock: first 3 landmarks are visited
       return ['1', '2', '3'].includes(landmarkId);
     }
 
     try {
-      const snapshot = await firestore()
-        .collection(COLLECTIONS.VISITS)
-        .where('userId', '==', userId)
-        .where('landmarkId', '==', landmarkId)
-        .limit(1)
+      const doc = await firestore()
+        .collection(COLLECTIONS.USERS).doc(userId)
+        .collection(COLLECTIONS.VISITED).doc(landmarkId)
         .get();
-
-      return !snapshot.empty;
+      return doc.exists();
     } catch (error) {
       console.error('Error checking visit status:', error);
       return false;
+    }
+  }
+
+  // Get all visited landmark IDs for a user
+  async getVisitedLandmarkIds(userId: string): Promise<string[]> {
+    if (!this.isFirebaseAvailable()) return [];
+    try {
+      const snapshot = await firestore()
+        .collection(COLLECTIONS.USERS).doc(userId)
+        .collection(COLLECTIONS.VISITED)
+        .get();
+      return snapshot.docs.map((doc: any) => doc.id);
+    } catch (error) {
+      console.error('Error fetching visited landmark IDs:', error);
+      return [];
     }
   }
 }

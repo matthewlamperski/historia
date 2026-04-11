@@ -8,14 +8,17 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import Video from 'react-native-video';
 import { Text } from '../ui';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { ReportModal } from './ReportModal';
+import { ImageViewerModal } from './ImageViewerModal';
 import { theme } from '../../constants/theme';
-import { Post as PostType } from '../../types';
+import { Post as PostType, Landmark } from '../../types';
 import { formatDistanceToNow } from '../../utils/formatters';
 import { moderationService } from '../../services/moderationService';
 import { useToast } from '../../hooks/useToast';
+import { useModeration } from '../../context/ModerationContext';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 
 interface PostProps {
@@ -24,6 +27,7 @@ interface PostProps {
   onShare?: (postId: string) => void;
   onUserPress?: (userId: string) => void;
   onDelete?: (postId: string) => void;
+  onLandmarkPress?: (landmark: Landmark) => void;
   currentUserId?: string;
   showFullContent?: boolean;
 }
@@ -36,14 +40,17 @@ export const Post: React.FC<PostProps> = ({
   onComment,
   onUserPress,
   onDelete,
-  currentUserId = 'mock-user-1',
+  onLandmarkPress,
+  currentUserId = '',
   showFullContent = false,
 }) => {
   const [imageIndex, setImageIndex] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const { showToast } = useToast();
+  const { isUserMuted, muteUser, unmuteUser } = useModeration();
 
   const isOwnPost = post.userId === currentUserId;
 
@@ -52,7 +59,7 @@ export const Post: React.FC<PostProps> = ({
   };
 
   const handleUserPress = () => {
-    if (onUserPress && post.userId !== currentUserId) {
+    if (onUserPress) {
       onUserPress(post.userId);
     }
   };
@@ -88,6 +95,21 @@ export const Post: React.FC<PostProps> = ({
     );
   }, [post.id, currentUserId, showToast, onDelete]);
 
+  const handleToggleMute = useCallback(async () => {
+    const muted = isUserMuted(post.userId);
+    try {
+      if (muted) {
+        await unmuteUser(post.userId);
+        showToast(`${post.user.name} unmuted`, 'success');
+      } else {
+        await muteUser(post.userId);
+        showToast(`${post.user.name} muted`, 'success');
+      }
+    } catch {
+      showToast('Failed to update mute status', 'error');
+    }
+  }, [post.userId, post.user.name, isUserMuted, muteUser, unmuteUser, showToast]);
+
   const getActionSheetOptions = (): ActionSheetOption[] => {
     if (isOwnPost) {
       return [
@@ -99,7 +121,13 @@ export const Post: React.FC<PostProps> = ({
         },
       ];
     }
+    const muted = isUserMuted(post.userId);
     return [
+      {
+        label: muted ? 'Unmute User' : 'Mute User',
+        icon: muted ? 'volume-high' : 'volume-xmark',
+        onPress: handleToggleMute,
+      },
       {
         label: 'Report Post',
         icon: 'flag',
@@ -113,11 +141,13 @@ export const Post: React.FC<PostProps> = ({
 
     if (post.images.length === 1) {
       return (
-        <Image
-          source={{ uri: post.images[0] }}
-          style={styles.singleImage}
-          resizeMode="cover"
-        />
+        <TouchableOpacity activeOpacity={0.9} onPress={() => setLightboxIndex(0)}>
+          <Image
+            source={{ uri: post.images[0] }}
+            style={styles.singleImage}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
       );
     }
 
@@ -135,12 +165,13 @@ export const Post: React.FC<PostProps> = ({
           scrollEventThrottle={16}
         >
           {post.images.map((uri, index) => (
-            <Image
-              key={index}
-              source={{ uri }}
-              style={styles.multipleImage}
-              resizeMode="cover"
-            />
+            <TouchableOpacity key={index} activeOpacity={0.9} onPress={() => setLightboxIndex(index)}>
+              <Image
+                source={{ uri }}
+                style={styles.multipleImage}
+                resizeMode="cover"
+              />
+            </TouchableOpacity>
           ))}
         </ScrollView>
 
@@ -161,6 +192,25 @@ export const Post: React.FC<PostProps> = ({
     );
   };
 
+  const renderVideos = () => {
+    const videos = post.videos ?? [];
+    if (videos.length === 0) return null;
+    return (
+      <View>
+        {videos.map((uri, index) => (
+          <Video
+            key={index}
+            source={{ uri }}
+            style={styles.videoPlayer}
+            controls
+            resizeMode="contain"
+            paused
+          />
+        ))}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -168,7 +218,7 @@ export const Post: React.FC<PostProps> = ({
         <TouchableOpacity
           style={styles.userInfo}
           onPress={handleUserPress}
-          disabled={!onUserPress || post.userId === currentUserId}
+          disabled={!onUserPress}
           activeOpacity={0.7}
         >
           <View style={styles.avatar}>
@@ -216,16 +266,27 @@ export const Post: React.FC<PostProps> = ({
 
       {/* Landmark Tag */}
       {post.landmark && (
-        <View style={styles.landmarkTag}>
-          <Icon name="location-dot" size={14} color={theme.colors.primary[600]} />
+        <TouchableOpacity
+          style={styles.landmarkTag}
+          onPress={() => onLandmarkPress?.(post.landmark!)}
+          disabled={!onLandmarkPress}
+          activeOpacity={onLandmarkPress ? 0.7 : 1}
+        >
+          <Icon name="landmark" size={14} color={theme.colors.primary[600]} />
           <Text variant="caption" color="primary.600" style={styles.landmarkText}>
             {post.landmark.name}
           </Text>
-        </View>
+          {onLandmarkPress && (
+            <Icon name="chevron-right" size={10} color={theme.colors.primary[400]} style={{ marginLeft: 2 }} />
+          )}
+        </TouchableOpacity>
       )}
 
       {/* Images */}
       {renderImages()}
+
+      {/* Videos */}
+      {renderVideos()}
 
       {/* Actions */}
       <View style={styles.actions}>
@@ -258,6 +319,16 @@ export const Post: React.FC<PostProps> = ({
           userName: post.user.name,
         }}
       />
+
+      {/* Image lightbox */}
+      {lightboxIndex !== null && (
+        <ImageViewerModal
+          visible={lightboxIndex !== null}
+          images={post.images}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </View>
   );
 };
@@ -322,20 +393,25 @@ const styles = StyleSheet.create({
   landmarkTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.sm,
     paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
     backgroundColor: theme.colors.primary[50],
     alignSelf: 'flex-start',
     marginHorizontal: theme.spacing.lg,
     borderRadius: theme.borderRadius.full,
-    paddingHorizontal: theme.spacing.sm,
   },
   landmarkText: {
     marginLeft: theme.spacing.xs,
     fontWeight: theme.fontWeight.medium,
   },
   imageContainer: {
+    marginBottom: theme.spacing.sm,
+  },
+  videoPlayer: {
+    width: imageWidth,
+    height: 240,
+    backgroundColor: theme.colors.gray[900],
     marginBottom: theme.spacing.sm,
   },
   singleImage: {

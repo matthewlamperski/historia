@@ -1,14 +1,5 @@
-// Firebase imports with error handling
-let firestore: any = null;
-let storage: any = null;
-
-try {
-  firestore = require('@react-native-firebase/firestore').default;
-  storage = require('@react-native-firebase/storage').default;
-} catch {
-  console.warn('Firebase modules not available, using mock data only');
-}
-
+import firestore from '@react-native-firebase/firestore';
+import storage from '@react-native-firebase/storage';
 import { COLLECTIONS } from './firebaseConfig';
 import {
   Conversation,
@@ -18,95 +9,7 @@ import {
   User
 } from '../types';
 
-// Mock data for development
-const mockUser: User = {
-  id: 'mock-user-id',
-  name: 'Demo User',
-  username: 'demo_user',
-  email: 'demo@historia.app',
-  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop&crop=face&auto=format',
-  followerCount: 100,
-  followingCount: 80,
-  postCount: 25,
-  isVerified: false,
-  companions: [],
-  visitedLandmarks: [],
-  bookmarkedLandmarks: [],
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
-
-const mockConversations: Conversation[] = [
-  {
-    id: 'mock-conv-1',
-    participants: ['mock-user-id', 'mock-user-1'],
-    participantDetails: [
-      mockUser,
-      {
-        ...mockUser,
-        id: 'mock-user-1',
-        name: 'Alice Smith',
-        username: 'alice_s',
-        avatar: 'https://i.pravatar.cc/150?img=5',
-      },
-    ],
-    lastMessage: 'Hey! How are you?',
-    lastMessageSenderId: 'mock-user-1',
-    lastMessageTimestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 min ago
-    unreadCount: { 'mock-user-id': 2, 'mock-user-1': 0 },
-    type: 'direct',
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 day ago
-    updatedAt: new Date(Date.now() - 1000 * 60 * 15),
-  },
-];
-
-const mockMessages: Message[] = [
-  {
-    id: 'mock-msg-1',
-    conversationId: 'mock-conv-1',
-    senderId: 'mock-user-id',
-    sender: mockUser,
-    text: 'Hello! 👋',
-    images: [],
-    likes: [],
-    isEmojiOnly: true,
-    readBy: ['mock-user-id', 'mock-user-1'],
-    timestamp: new Date(Date.now() - 1000 * 60 * 30), // 30 min ago
-    updatedAt: new Date(Date.now() - 1000 * 60 * 30),
-  },
-  {
-    id: 'mock-msg-2',
-    conversationId: 'mock-conv-1',
-    senderId: 'mock-user-1',
-    sender: {
-      ...mockUser,
-      id: 'mock-user-1',
-      name: 'Alice Smith',
-      username: 'alice_s',
-      avatar: 'https://i.pravatar.cc/150?img=5',
-    },
-    text: 'Hey! How are you?',
-    images: [],
-    likes: ['mock-user-id'],
-    isEmojiOnly: false,
-    readBy: ['mock-user-1'],
-    timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 min ago
-    updatedAt: new Date(Date.now() - 1000 * 60 * 15),
-  },
-];
-
 class MessagingService {
-  // Check if Firebase is available
-  private isFirebaseAvailable(): boolean {
-    try {
-      if (!firestore || !storage) return false;
-      firestore();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   // Emoji-only detection
   private isEmojiOnly(text: string): boolean {
     const emojiRegex = /^[\p{Emoji}\s]+$/u;
@@ -121,11 +24,6 @@ class MessagingService {
     limit: number = 20,
     lastConversationId?: string
   ): Promise<Conversation[]> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return mockConversations.slice(0, limit);
-    }
-
     try {
       let query = firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
@@ -139,7 +37,7 @@ class MessagingService {
           .doc(lastConversationId)
           .get();
 
-        if (lastDoc.exists) {
+        if (lastDoc.data()) {
           query = query.startAfter(lastDoc);
         }
       }
@@ -157,10 +55,10 @@ class MessagingService {
         } as Conversation;
       });
 
-      return conversations;
+      return this.hydrateConversations(conversations);
     } catch (error) {
       console.error('Error fetching conversations:', error);
-      return mockConversations.slice(0, limit);
+      throw error;
     }
   }
 
@@ -178,19 +76,12 @@ class MessagingService {
     currentUserId: string,
     otherUserId: string
   ): Promise<Conversation> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return mockConversations[0];
-    }
-
     try {
-      // Check if conversation already exists
       const existingSnapshot = await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .where('participants', 'array-contains', currentUserId)
         .get();
 
-      // Find conversation with both users
       const existing = existingSnapshot.docs.find((doc: any) => {
         const participants = doc.data().participants;
         return participants.includes(currentUserId) && participants.includes(otherUserId);
@@ -207,7 +98,6 @@ class MessagingService {
         } as Conversation;
       }
 
-      // Create new conversation
       return this.createConversation(
         { participantIds: [currentUserId, otherUserId] },
         currentUserId
@@ -223,15 +113,9 @@ class MessagingService {
     data: CreateConversationData,
     currentUserId: string
   ): Promise<Conversation> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return mockConversations[0];
-    }
-
     try {
       const now = firestore.Timestamp.now();
 
-      // Fetch participant details
       const participantDetails: User[] = [];
       for (const userId of data.participantIds) {
         const userDoc = await firestore()
@@ -239,12 +123,11 @@ class MessagingService {
           .doc(userId)
           .get();
 
-        if (userDoc.exists) {
-          participantDetails.push(userDoc.data() as User);
+        if (userDoc.data()) {
+          participantDetails.push({ id: userId, ...userDoc.data() } as User);
         }
       }
 
-      // Initialize unread counts to 0 for all participants
       const unreadCount: { [userId: string]: number } = {};
       data.participantIds.forEach(userId => {
         unreadCount[userId] = 0;
@@ -266,7 +149,6 @@ class MessagingService {
         .collection(COLLECTIONS.CONVERSATIONS)
         .add(newConversation);
 
-      // Send initial message if provided
       if (data.initialMessage) {
         await this.sendMessage(
           {
@@ -292,13 +174,7 @@ class MessagingService {
 
   // Delete a conversation
   async deleteConversation(conversationId: string): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return;
-    }
-
     try {
-      // Delete all messages in the conversation
       const messagesSnapshot = await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(conversationId)
@@ -307,12 +183,10 @@ class MessagingService {
 
       const batch = firestore().batch();
 
-      // Delete all messages
       messagesSnapshot.docs.forEach((doc: any) => {
         batch.delete(doc.ref);
       });
 
-      // Delete the conversation document
       batch.delete(
         firestore().collection(COLLECTIONS.CONVERSATIONS).doc(conversationId)
       );
@@ -332,11 +206,6 @@ class MessagingService {
     limit: number = 50,
     lastMessageId?: string
   ): Promise<Message[]> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return mockMessages.slice(0, limit);
-    }
-
     try {
       let query = firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
@@ -353,25 +222,23 @@ class MessagingService {
           .doc(lastMessageId)
           .get();
 
-        if (lastDoc.exists) {
+        if (lastDoc.data()) {
           query = query.startAfter(lastDoc);
         }
       }
 
       const snapshot = await query.get();
 
-      // Enrich messages with sender data
       const messages = await Promise.all(
         snapshot.docs.map(async (doc: any) => {
           const data = doc.data();
 
-          // Fetch sender details
           const senderDoc = await firestore()
             .collection(COLLECTIONS.USERS)
             .doc(data.senderId)
             .get();
 
-          const sender = senderDoc.exists ? (senderDoc.data() as User) : mockUser;
+          const sender = { id: data.senderId, ...senderDoc.data() } as User;
 
           return {
             id: doc.id,
@@ -387,7 +254,7 @@ class MessagingService {
       return messages;
     } catch (error) {
       console.error('Error fetching messages:', error);
-      return mockMessages.slice(0, limit);
+      throw error;
     }
   }
 
@@ -405,16 +272,6 @@ class MessagingService {
     data: CreateMessageData,
     senderId: string
   ): Promise<Message> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return {
-        ...mockMessages[0],
-        id: `temp-${Date.now()}`,
-        text: data.text,
-        timestamp: new Date(),
-      };
-    }
-
     try {
       const now = firestore.Timestamp.now();
 
@@ -423,29 +280,41 @@ class MessagingService {
         senderId,
         text: data.text,
         images: data.images || [],
+        videos: data.videos || [],
         postReference: data.postReference || null,
         likes: [],
         isEmojiOnly: this.isEmojiOnly(data.text),
-        readBy: [senderId], // Sender has read their own message
+        readBy: [senderId],
         timestamp: now,
         updatedAt: now,
       };
 
-      // Create message
       const messageRef = await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(data.conversationId)
         .collection(COLLECTIONS.MESSAGES)
         .add(newMessage);
 
-      // Update conversation's last message
-      await this.updateConversationLastMessage(data.conversationId, {
-        ...newMessage,
-        id: messageRef.id,
-        timestamp: now.toDate(),
-      } as any);
+      // Build preview text for conversation list
+      const images = newMessage.images || [];
+      const videos = newMessage.videos || [];
+      const hasText = !!newMessage.text?.trim();
+      const hasImages = images.length > 0;
+      const hasVideos = videos.length > 0;
+      const previewText = hasText
+        ? newMessage.text.trim()
+        : hasVideos
+          ? (videos.length === 1 ? 'Video' : `${videos.length} Videos`)
+          : (hasImages ? (images.length === 1 ? 'Photo' : `${images.length} Photos`) : '');
+      const previewType: 'text' | 'image' = (hasImages || hasVideos) && !hasText ? 'image' : 'text';
 
-      // Increment unread count for other participants
+      await this.updateConversationLastMessage(data.conversationId, {
+        text: previewText,
+        type: previewType,
+        senderId,
+        timestamp: now.toDate(),
+      });
+
       const conversationDoc = await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(data.conversationId)
@@ -455,7 +324,6 @@ class MessagingService {
       const otherParticipants = participants.filter((id: string) => id !== senderId);
       await this.incrementUnreadCount(data.conversationId, otherParticipants);
 
-      // Fetch sender details
       const senderDoc = await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(senderId)
@@ -464,7 +332,7 @@ class MessagingService {
       return {
         id: messageRef.id,
         ...newMessage,
-        sender: senderDoc.exists ? (senderDoc.data() as User) : mockUser,
+        sender: { id: senderId, ...senderDoc.data() } as User,
         timestamp: now.toDate(),
         updatedAt: now.toDate(),
       } as Message;
@@ -480,20 +348,18 @@ class MessagingService {
     senderId: string,
     imageUris: string[]
   ): Promise<Message> {
-    if (!this.isFirebaseAvailable()) {
-      await new Promise<void>(resolve => setTimeout(resolve, 300));
-      return this.sendMessage(data, senderId);
-    }
-
     try {
-      // Upload images
-      const uploadPromises = imageUris.map((uri, index) =>
-        this.uploadMessageImage(uri, senderId, data.conversationId)
-      );
+      // Upload images sequentially to avoid Firebase Storage overload
+      const imageUrls: string[] = [];
+      for (const uri of imageUris) {
+        try {
+          const url = await this.uploadMessageImage(uri, senderId, data.conversationId);
+          imageUrls.push(url);
+        } catch (uploadError) {
+          console.error('Error uploading image, skipping:', uploadError);
+        }
+      }
 
-      const imageUrls = await Promise.all(uploadPromises);
-
-      // Send message with image URLs
       return this.sendMessage({ ...data, images: imageUrls }, senderId);
     } catch (error) {
       console.error('Error sending message with images:', error);
@@ -507,10 +373,6 @@ class MessagingService {
     userId: string,
     conversationId: string
   ): Promise<string> {
-    if (!this.isFirebaseAvailable()) {
-      return uri; // Return local URI as fallback
-    }
-
     try {
       const timestamp = Date.now();
       const imageName = `messages/${userId}/${conversationId}/${timestamp}.jpg`;
@@ -522,7 +384,63 @@ class MessagingService {
       return downloadURL;
     } catch (error) {
       console.error('Error uploading message image:', error);
-      return uri; // Return local URI as fallback
+      throw error;
+    }
+  }
+
+  // Upload message video to Firebase Storage
+  async uploadMessageVideo(
+    uri: string,
+    userId: string,
+    conversationId: string
+  ): Promise<string> {
+    try {
+      const timestamp = Date.now();
+      const videoName = `messages/${userId}/${conversationId}/${timestamp}.mp4`;
+      const reference = storage().ref(videoName);
+
+      await reference.putFile(uri);
+      const downloadURL = await reference.getDownloadURL();
+
+      return downloadURL;
+    } catch (error) {
+      console.error('Error uploading message video:', error);
+      throw error;
+    }
+  }
+
+  // Send message with both images and videos
+  async sendMessageWithMedia(
+    data: CreateMessageData,
+    senderId: string,
+    imageUris: string[],
+    videoUris: string[]
+  ): Promise<Message> {
+    try {
+      const imageUrls: string[] = [];
+      for (const uri of imageUris) {
+        try {
+          const url = await this.uploadMessageImage(uri, senderId, data.conversationId);
+          imageUrls.push(url);
+        } catch (uploadError) {
+          console.error('Error uploading image, skipping:', uploadError);
+        }
+      }
+
+      const videoUrls: string[] = [];
+      for (const uri of videoUris) {
+        try {
+          const url = await this.uploadMessageVideo(uri, senderId, data.conversationId);
+          videoUrls.push(url);
+        } catch (uploadError) {
+          console.error('Error uploading video, skipping:', uploadError);
+        }
+      }
+
+      return this.sendMessage({ ...data, images: imageUrls, videos: videoUrls }, senderId);
+    } catch (error) {
+      console.error('Error sending message with media:', error);
+      throw error;
     }
   }
 
@@ -533,12 +451,7 @@ class MessagingService {
     conversationId: string,
     userId: string
   ): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      return;
-    }
-
     try {
-      // Get all unread messages
       const messagesSnapshot = await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(conversationId)
@@ -546,7 +459,6 @@ class MessagingService {
         .where('readBy', 'not-in', [[userId]])
         .get();
 
-      // Batch update readBy array
       const batch = firestore().batch();
 
       messagesSnapshot.docs.forEach((doc: any) => {
@@ -555,7 +467,6 @@ class MessagingService {
         });
       });
 
-      // Reset unread count for this user
       batch.update(
         firestore().collection(COLLECTIONS.CONVERSATIONS).doc(conversationId),
         {
@@ -575,10 +486,6 @@ class MessagingService {
     messageId: string,
     userId: string
   ): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      return;
-    }
-
     try {
       const messageRef = firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
@@ -614,20 +521,14 @@ class MessagingService {
     userId: string,
     callback: (conversations: Conversation[]) => void
   ): () => void {
-    if (!this.isFirebaseAvailable()) {
-      // Call callback with mock data
-      callback(mockConversations);
-      return () => {}; // Return empty unsubscribe
-    }
-
     try {
       const unsubscribe = firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .where('participants', 'array-contains', userId)
         .orderBy('lastMessageTimestamp', 'desc')
-        .limit(20) // Limit to 20 most recent conversations
+        .limit(20)
         .onSnapshot(
-          (snapshot: any) => {
+          async (snapshot: any) => {
             const conversations = snapshot.docs.map((doc: any) => {
               const data = doc.data();
               return {
@@ -639,18 +540,17 @@ class MessagingService {
               } as Conversation;
             });
 
-            callback(conversations);
+            const hydrated = await this.hydrateConversations(conversations);
+            callback(hydrated);
           },
           (error: any) => {
             console.error('Error listening to conversations:', error);
-            callback(mockConversations);
           }
         );
 
       return unsubscribe;
     } catch (error) {
       console.error('Error subscribing to conversations:', error);
-      callback(mockConversations);
       return () => {};
     }
   }
@@ -660,33 +560,25 @@ class MessagingService {
     conversationId: string,
     callback: (messages: Message[]) => void
   ): () => void {
-    if (!this.isFirebaseAvailable()) {
-      // Call callback with mock data
-      callback(mockMessages);
-      return () => {}; // Return empty unsubscribe
-    }
-
     try {
       const unsubscribe = firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(conversationId)
         .collection(COLLECTIONS.MESSAGES)
-        .orderBy('timestamp', 'asc') // Oldest first for chat display
-        .limit(50) // Listen to latest 50 messages
+        .orderBy('timestamp', 'asc')
+        .limit(50)
         .onSnapshot(
           async (snapshot: any) => {
-            // Enrich messages with sender data
             const messages = await Promise.all(
               snapshot.docs.map(async (doc: any) => {
                 const data = doc.data();
 
-                // Fetch sender details
                 const senderDoc = await firestore()
                   .collection(COLLECTIONS.USERS)
                   .doc(data.senderId)
                   .get();
 
-                const sender = senderDoc.exists ? (senderDoc.data() as User) : mockUser;
+                const sender = { id: data.senderId, ...senderDoc.data() } as User;
 
                 return {
                   id: doc.id,
@@ -703,35 +595,168 @@ class MessagingService {
           },
           (error: any) => {
             console.error('Error listening to messages:', error);
-            callback(mockMessages);
           }
         );
 
       return unsubscribe;
     } catch (error) {
       console.error('Error subscribing to messages:', error);
-      callback(mockMessages);
       return () => {};
+    }
+  }
+
+  // =============== GROUP CONVERSATION METHODS ===============
+
+  // Create a group conversation
+  async createGroupConversation(
+    name: string,
+    createdByUserId: string,
+    participantIds: string[]
+  ): Promise<Conversation> {
+    try {
+      const now = firestore.Timestamp.now();
+      const allParticipantIds = Array.from(new Set([createdByUserId, ...participantIds]));
+
+      const participantDetails: User[] = [];
+      for (const userId of allParticipantIds) {
+        const userDoc = await firestore()
+          .collection(COLLECTIONS.USERS)
+          .doc(userId)
+          .get();
+        if (userDoc.data()) {
+          participantDetails.push({ id: userId, ...userDoc.data() } as User);
+        }
+      }
+
+      const unreadCount: { [userId: string]: number } = {};
+      allParticipantIds.forEach(userId => {
+        unreadCount[userId] = 0;
+      });
+
+      const newConversation = {
+        participants: allParticipantIds,
+        participantDetails,
+        lastMessage: '',
+        lastMessageSenderId: createdByUserId,
+        lastMessageTimestamp: now,
+        unreadCount,
+        type: 'group' as const,
+        name,
+        createdBy: createdByUserId,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const docRef = await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .add(newConversation);
+
+      return {
+        id: docRef.id,
+        ...newConversation,
+        lastMessageTimestamp: now.toDate(),
+        createdAt: now.toDate(),
+        updatedAt: now.toDate(),
+      } as Conversation;
+    } catch (error) {
+      console.error('Error creating group conversation:', error);
+      throw error;
+    }
+  }
+
+  // Update group info (name)
+  async updateGroupInfo(
+    conversationId: string,
+    updates: { name?: string }
+  ): Promise<void> {
+    try {
+      await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(conversationId)
+        .set({ ...updates, updatedAt: firestore.Timestamp.now() }, { merge: true });
+    } catch (error) {
+      console.error('Error updating group info:', error);
+      throw error;
+    }
+  }
+
+  // Leave a group conversation
+  async leaveGroup(conversationId: string, userId: string): Promise<void> {
+    try {
+      const convDoc = await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(conversationId)
+        .get();
+
+      if (!convDoc.data()) return;
+
+      const data = convDoc.data();
+      const remaining: string[] = (data?.participants || []).filter(
+        (id: string) => id !== userId
+      );
+      const remainingDetails = (data?.participantDetails || []).filter(
+        (u: User) => u.id !== userId
+      );
+
+      if (remaining.length === 0) {
+        await this.deleteConversation(conversationId);
+        return;
+      }
+
+      await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(conversationId)
+        .set(
+          {
+            participants: remaining,
+            participantDetails: remainingDetails,
+            updatedAt: firestore.Timestamp.now(),
+          },
+          { merge: true }
+        );
+    } catch (error) {
+      console.error('Error leaving group:', error);
+      throw error;
+    }
+  }
+
+  // Get a single conversation by ID
+  async getConversation(conversationId: string): Promise<Conversation | null> {
+    try {
+      const doc = await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(conversationId)
+        .get();
+
+      if (!doc.data()) return null;
+
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        lastMessageTimestamp: data!.lastMessageTimestamp?.toDate() || new Date(),
+        createdAt: data!.createdAt?.toDate() || new Date(),
+        updatedAt: data!.updatedAt?.toDate() || new Date(),
+      } as Conversation;
+    } catch (error) {
+      console.error('Error fetching conversation:', error);
+      return null;
     }
   }
 
   // =============== HELPER METHODS ===============
 
-  // Update conversation's last message
   private async updateConversationLastMessage(
     conversationId: string,
-    message: { text: string; senderId: string; timestamp: Date }
+    message: { text: string; type: 'text' | 'image'; senderId: string; timestamp: Date }
   ): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      return;
-    }
-
     try {
       await firestore()
         .collection(COLLECTIONS.CONVERSATIONS)
         .doc(conversationId)
         .update({
           lastMessage: message.text,
+          lastMessageType: message.type,
           lastMessageSenderId: message.senderId,
           lastMessageTimestamp: firestore.Timestamp.fromDate(message.timestamp),
           updatedAt: firestore.Timestamp.now(),
@@ -741,15 +766,68 @@ class MessagingService {
     }
   }
 
-  // Increment unread count for recipients
+  // Fetch the last message preview from the messages subcollection
+  private async fetchLastMessagePreview(
+    conversationId: string
+  ): Promise<{ text: string; type: 'text' | 'image'; senderId: string } | null> {
+    try {
+      const snap = await firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(conversationId)
+        .collection(COLLECTIONS.MESSAGES)
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+      if (snap.empty) return null;
+      const d = snap.docs[0].data();
+      const imgs: string[] = d.images || [];
+      const vids: string[] = d.videos || [];
+      const hasText = !!d.text?.trim();
+      const hasImages = imgs.length > 0;
+      const hasVideos = vids.length > 0;
+      const text = hasText
+        ? d.text.trim()
+        : hasVideos
+          ? (vids.length === 1 ? 'Video' : `${vids.length} Videos`)
+          : (hasImages ? (imgs.length === 1 ? 'Photo' : `${imgs.length} Photos`) : '');
+      return { text, type: (hasImages || hasVideos) && !hasText ? 'image' : 'text', senderId: d.senderId };
+    } catch {
+      return null;
+    }
+  }
+
+  // Fill in missing lastMessage fields by fetching from messages subcollection
+  private async hydrateConversations(conversations: Conversation[]): Promise<Conversation[]> {
+    const empty = conversations.filter(c => !c.lastMessage);
+    if (empty.length === 0) return conversations;
+
+    const previews = await Promise.all(
+      empty.map(async c => ({ id: c.id, preview: await this.fetchLastMessagePreview(c.id) }))
+    );
+
+    const previewMap = new Map(previews.map(p => [p.id, p.preview]));
+
+    return conversations.map(c => {
+      const preview = previewMap.get(c.id);
+      if (!preview) return c;
+      // Self-heal Firestore so the subscription picks it up next time
+      firestore()
+        .collection(COLLECTIONS.CONVERSATIONS)
+        .doc(c.id)
+        .update({
+          lastMessage: preview.text,
+          lastMessageType: preview.type,
+          lastMessageSenderId: preview.senderId,
+        })
+        .catch(() => {});
+      return { ...c, lastMessage: preview.text, lastMessageType: preview.type, lastMessageSenderId: preview.senderId };
+    });
+  }
+
   private async incrementUnreadCount(
     conversationId: string,
     recipientIds: string[]
   ): Promise<void> {
-    if (!this.isFirebaseAvailable()) {
-      return;
-    }
-
     try {
       const updates: any = {};
       recipientIds.forEach(userId => {

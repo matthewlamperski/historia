@@ -21,7 +21,7 @@ const DefaultLockedState: React.FC<{ onPress: () => void }> = ({ onPress }) => (
       <FontAwesome6 name="lock" size={18} color={theme.colors.primary[500]} iconStyle="solid" />
     </View>
     <Text variant="label" weight="semibold" style={styles.lockedTitle}>
-      Premium Feature
+      Pro Feature
     </Text>
     <Text variant="caption" color="gray.500" style={styles.lockedSubtitle}>
       Upgrade to unlock this feature
@@ -29,7 +29,7 @@ const DefaultLockedState: React.FC<{ onPress: () => void }> = ({ onPress }) => (
     <View style={styles.lockedBadge}>
       <FontAwesome6 name="crown" size={10} color={theme.colors.white} iconStyle="solid" />
       <Text variant="caption" weight="semibold" style={styles.lockedBadgeText}>
-        Go Premium
+        Go Pro
       </Text>
     </View>
   </TouchableOpacity>
@@ -66,7 +66,7 @@ export const PremiumGate: React.FC<PremiumGateProps> = ({
               iconStyle="solid"
             />
             <Text variant="caption" weight="bold" style={styles.previewBadgeText}>
-              Premium
+              Pro
             </Text>
           </View>
         </TouchableOpacity>

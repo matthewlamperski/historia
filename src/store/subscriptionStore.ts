@@ -106,10 +106,10 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
             // Acknowledge the purchase
             await finishTransaction({ purchase, isConsumable: false });
 
-            // Calculate trial end date (30 days from now)
+            // Calculate trial end date (14 days from now)
             const trialStart = new Date();
             const trialEnd = new Date();
-            trialEnd.setDate(trialEnd.getDate() + 30);
+            trialEnd.setDate(trialEnd.getDate() + 14);
 
             // Save to Firestore
             await subscriptionService.updateSubscription(userId, {

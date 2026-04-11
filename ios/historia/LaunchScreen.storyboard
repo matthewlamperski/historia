@@ -30,6 +30,7 @@
                             <constraint firstItem="I0S-Ul-yLN" firstAttribute="leading" secondItem="Bcu-3y-fUS" secondAttribute="leading" constant="23" id="KtF-JE-Nn3"/>
                             <constraint firstItem="I0S-Ul-yLN" firstAttribute="top" secondItem="Bcu-3y-fUS" secondAttribute="top" constant="200" id="ilw-VM-goz"/>
                             <constraint firstItem="nB1-on-9H9" firstAttribute="top" secondItem="I0S-Ul-yLN" secondAttribute="bottom" constant="50" id="rlW-yH-VEy"/>
+                            <constraint firstItem="nB1-on-9H9" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="spinner-centerX"/>
                         </constraints>
                     </view>
                 </viewController>

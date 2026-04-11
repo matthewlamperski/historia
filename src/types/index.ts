@@ -7,12 +7,25 @@ export type RootStackParamList = {
   Profile: { userId: string };
   ProfileView: { userId: string };
   PostDetail: { post: Post };
-  ChatScreen: { conversationId: string; otherUserId?: string };
+  ChatScreen: { conversationId: string; otherUserId?: string; otherUserName?: string; otherUserAvatar?: string; otherUserUsername?: string };
   Settings: undefined;
   BlockedUsers: undefined;
+  MutedUsers: undefined;
   Subscription: undefined;
   Bookmarks: undefined;
   EditProfile: undefined;
+  OfflineMaps: undefined;
+  NewConversation: undefined;
+  NewGroup: undefined;
+  GroupInfo: { conversationId: string };
+  ChooseHandle: undefined;
+  Notifications: undefined;
+  Levels: { userId: string };
+  FAQ: undefined;
+  FollowList: { userId: string; mode: 'following' | 'followers' };
+  CompanionsList: { userId: string };
+  SetHometown: undefined;
+  NearbyUsers: undefined;
   // Add more screens as needed
 };
 
@@ -20,6 +33,7 @@ export type TabParamList = {
   Map: undefined;
   Feed: undefined;
   Messages: undefined;
+  Shop: undefined;
   Profile: undefined;
 };
 
@@ -108,6 +122,7 @@ export interface SubscriptionRecord {
   productId: string | null;
   transactionId: string | null;
   platform: 'ios' | 'android' | null;
+  referralBonusExpiry?: string | null; // ISO date — user gets premium until this date via referral
   createdAt: string;
   updatedAt: string;
 }
@@ -127,14 +142,59 @@ export interface User {
   postCount: number;
   isVerified: boolean;
   companions: string[]; // array of user IDs who are companions
-  visitedLandmarks: string[]; // array of landmark IDs visited
-  bookmarkedLandmarks: string[]; // array of landmark IDs bookmarked
+  // Bookmark/visit counts stored on user doc for display (actual data in subcollections)
+  bookmarkCount?: number;
+  visitedLandmarks?: string[]; // @deprecated — use users/{id}/visited subcollection
+  bookmarkedLandmarks?: string[]; // @deprecated — use users/{id}/bookmarks subcollection
   // Subscription fields (optional for backwards compatibility with existing data)
   isPremium?: boolean;
   pointsBalance?: number;
   subscriptionStatus?: SubscriptionStatus;
+  fcmToken?: string; // Firebase Cloud Messaging token for push notifications
+  referralCode?: string; // Unique referral code for this user
+  hometown?: {
+    latitude: number;
+    longitude: number;
+    city: string; // Display name, e.g. "Cincinnati, OH"
+  };
   createdAt: string;
   updatedAt: string;
+}
+
+// Referral types
+export type ReferralStatus = 'pending' | 'completed' | 'invalid';
+
+export interface Referral {
+  id: string;
+  referrerId: string;
+  referredId: string | null;
+  referralCode: string;
+  status: ReferralStatus;
+  createdAt: Date;
+  completedAt: Date | null;
+}
+
+// Notification types
+export type NotificationType = 'companion_request' | 'companion_accepted';
+
+export interface AppNotification {
+  id: string;
+  recipientId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  senderUsername?: string;
+  type: NotificationType;
+  referenceId: string; // companion request doc ID
+  isRead: boolean;
+  createdAt: Date;
+}
+
+// Minimal landmark snapshot saved alongside a post for fast feed rendering
+export interface LandmarkTag {
+  id: string;           // Algolia objectID / Firestore landmark doc ID
+  name: string;
+  category: Landmark['category'];
 }
 
 // Post types
@@ -144,13 +204,20 @@ export interface Post {
   user: User;
   content: string;
   images: string[];
+  videos?: string[];
   commentCount: number;
   landmarkId?: string; // optional landmark ID if post is about a landmark
-  landmark?: Landmark; // optional populated landmark data
+  landmark?: Landmark; // optional populated landmark data (legacy)
+  landmarkTag?: LandmarkTag; // minimal snapshot for feed display
   location?: {
     latitude: number;
     longitude: number;
     address?: string;
+    city?: string;
+  };
+  _geoloc?: {
+    lat: number;
+    lng: number;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -172,11 +239,14 @@ export interface Comment {
 export interface CreatePostData {
   content: string;
   images?: string[];
-  landmarkId?: string; // optional landmark ID
+  videos?: string[];
+  landmarkId?: string; // optional landmark ID (legacy)
+  landmarkTag?: LandmarkTag; // preferred: minimal snapshot + id
   location?: {
     latitude: number;
     longitude: number;
     address?: string;
+    city?: string;
   };
 }
 
@@ -187,6 +257,8 @@ export interface CreateCommentData {
 }
 
 // Landmark types
+export type LandmarkType = 'museum' | 'historic_site' | 'manufacturer';
+
 export interface Landmark {
   id: string;
   name: string;
@@ -198,11 +270,33 @@ export interface Landmark {
   };
   yearBuilt?: number;
   category: 'monument' | 'building' | 'site' | 'battlefield' | 'other';
+  landmarkType?: LandmarkType;
   images: string[];
   historicalSignificance: string;
   visitingHours?: string;
   website?: string;
   address: string;
+  // Location context (from Algolia/Firestore)
+  city?: string;
+  state?: string;
+  // Google Places enrichment — present once a user first taps this landmark
+  populated?: boolean;
+  phone?: string;
+  googleMapsUri?: string;
+  rating?: number;
+  ratingCount?: number;
+  openingHours?: string[]; // e.g. ["Monday: 9:00 AM – 5:00 PM", ...]
+  wheelchair?: boolean;
+  editorialSummary?: string; // short description from Google Places editorialSummary
+}
+
+// Offline map pack metadata (stored in AsyncStorage)
+export interface OfflinePackMeta {
+  packName: string;       // unique key used by MapLibre offlineManager
+  landmarkId: string;
+  landmarkName: string;
+  downloadedAt: string;   // ISO date string
+  estimatedSizeMB: number;
 }
 
 // Firebase timestamp type
@@ -217,10 +311,13 @@ export interface Conversation {
   participants: string[];
   participantDetails: User[];
   lastMessage: string;
+  lastMessageType?: 'text' | 'image';
   lastMessageSenderId: string;
   lastMessageTimestamp: Date;
   unreadCount: { [userId: string]: number };
   type: 'direct' | 'group';
+  name?: string;       // required for group conversations
+  createdBy?: string;  // userId of creator (groups only)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -233,6 +330,7 @@ export interface Message {
   sender: User;
   text: string;
   images: string[];
+  videos?: string[];
   postReference?: {
     postId: string;
     content: string;
@@ -252,6 +350,7 @@ export interface CreateMessageData {
   conversationId: string;
   text: string;
   images?: string[];
+  videos?: string[];
   postReference?: {
     postId: string;
     content: string;
@@ -361,6 +460,14 @@ export interface Block {
   id: string; // Format: "{blockerId}_{blockedId}"
   blockerId: string;
   blockedId: string;
+  createdAt: Date;
+}
+
+// Mute types
+export interface Mute {
+  id: string; // Format: "{muterId}_{mutedId}"
+  muterId: string;
+  mutedId: string;
   createdAt: Date;
 }
 

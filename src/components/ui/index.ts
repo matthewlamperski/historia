@@ -15,6 +15,15 @@ export { PremiumGate } from './PremiumGate';
 export { default as LandmarkDetailSheet } from './LandmarkDetailSheet';
 export type { LandmarkDetailSheetProps } from './LandmarkDetailSheet';
 export { JournalModal } from './JournalModal';
+export { LevelBadge } from './LevelBadge';
+export { ChallengeCoin } from './ChallengeCoin';
+export { ImageViewerModal } from './ImageViewerModal';
+export type { ImageViewerModalProps } from './ImageViewerModal';
+export { LocationPickerModal } from './LocationPickerModal';
+export type { PickedLocation } from './LocationPickerModal';
+export { LandmarkPickerModal } from './LandmarkPickerModal';
+export type { PickedLandmark } from './LandmarkPickerModal';
+export { LandmarkModal } from './LandmarkModal';
 
 // Add more UI components as they are created
 export type { ButtonVariant, ButtonSize } from '../../types';

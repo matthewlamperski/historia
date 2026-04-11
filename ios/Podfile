@@ -33,5 +33,69 @@ target 'historia' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Fix: fmt 11.0.2 enables consteval for Apple Clang >= 14 via __cpp_consteval,
+    # but Xcode 26's stricter Clang rejects pointer arithmetic in consteval context.
+    # Patch base.h to disable consteval for all Apple Clang builds.
+    fmt_base_h = File.join(__dir__, 'Pods/fmt/include/fmt/base.h')
+    if File.exist?(fmt_base_h)
+      content = File.read(fmt_base_h)
+      patched = content.gsub(
+        '#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L',
+        '#elif defined(__apple_build_version__)  // Disable consteval for all Apple Clang (Xcode 26 regression)'
+      )
+      File.write(fmt_base_h, patched) if patched != content
+    end
+    # Required for @maplibre/maplibre-react-native — adds the MapLibre native
+    # SDK as a Swift Package Manager dependency to the Xcode project.
+    $MLRN.post_install(installer)
+
+    # Inject archive-only Run Script phases into the app target.
+    # Each phase is guarded so it is only added once (idempotent across pod installs).
+    project_path = File.join(File.dirname(__FILE__), 'historia.xcodeproj')
+    project = Xcodeproj::Project.open(project_path)
+    project.targets.each do |target|
+      next unless target.name == 'historia'
+
+      # Fix 1: Xcode 15+ duplicate MapLibre XCFramework signature file during archive.
+      sig_phase_name = 'Remove MapLibre Duplicate Signatures'
+      unless target.build_phases.any? { |p| p.respond_to?(:name) && p.name == sig_phase_name }
+        phase = target.new_shell_script_build_phase(sig_phase_name)
+        phase.shell_script = 'find "${BUILT_PRODUCTS_DIR}" -name "*.xcframework-ios.signature" -delete 2>/dev/null; exit 0'
+        phase.run_only_for_deployment_postprocessing = '1'
+      end
+
+      # Fix 2: Generate missing hermesvm.framework dSYM (RN ships pre-built without dSYMs).
+      hermes_phase_name = 'Generate hermesvm dSYM'
+      unless target.build_phases.any? { |p| p.respond_to?(:name) && p.name == hermes_phase_name }
+        phase = target.new_shell_script_build_phase(hermes_phase_name)
+        phase.shell_script = <<~SCRIPT
+          set -e
+          HERMES_BINARY="${PODS_ROOT}/hermes-engine/destroot/Library/Frameworks/universal/hermesvm.xcframework/ios-arm64/hermesvm.framework/hermesvm"
+          DSYM_OUTPUT="${DWARF_DSYM_FOLDER_PATH}/hermesvm.framework.dSYM"
+          if [ -f "$HERMES_BINARY" ] && [ ! -d "$DSYM_OUTPUT" ]; then
+            dsymutil "$HERMES_BINARY" -o "$DSYM_OUTPUT"
+          fi
+        SCRIPT
+        phase.run_only_for_deployment_postprocessing = '1'
+      end
+
+      # Fix 3: Generate missing MapLibre.framework dSYM (SPM artifact ships without dSYMs).
+      maplibre_phase_name = 'Generate MapLibre dSYM'
+      unless target.build_phases.any? { |p| p.respond_to?(:name) && p.name == maplibre_phase_name }
+        phase = target.new_shell_script_build_phase(maplibre_phase_name)
+        phase.shell_script = <<~SCRIPT
+          set -e
+          MAPLIBRE_BINARY=$(find "${BUILD_DIR%Build/*}SourcePackages/artifacts" \
+            -path "*/MapLibre.xcframework/ios-arm64/MapLibre.framework/MapLibre" 2>/dev/null | head -1)
+          DSYM_OUTPUT="${DWARF_DSYM_FOLDER_PATH}/MapLibre.framework.dSYM"
+          if [ -n "$MAPLIBRE_BINARY" ] && [ ! -d "$DSYM_OUTPUT" ]; then
+            dsymutil "$MAPLIBRE_BINARY" -o "$DSYM_OUTPUT"
+          fi
+        SCRIPT
+        phase.run_only_for_deployment_postprocessing = '1'
+      end
+    end
+    project.save
   end
 end

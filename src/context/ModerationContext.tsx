@@ -7,8 +7,9 @@ import React, {
   ReactNode,
 } from 'react';
 import { moderationService } from '../services/moderationService';
+import { muteService } from '../services/muteService';
 import { useAuthStore } from '../store/authStore';
-import { Block, UserBan } from '../types';
+import { Block, Mute, UserBan } from '../types';
 
 interface ModerationContextType {
   blockedUserIds: string[];
@@ -17,6 +18,11 @@ interface ModerationContextType {
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
   refreshBlockedUsers: () => Promise<void>;
+  mutedUserIds: string[];
+  mutedUsers: Mute[];
+  isUserMuted: (userId: string) => boolean;
+  muteUser: (userId: string) => Promise<void>;
+  unmuteUser: (userId: string) => Promise<void>;
   userBan: UserBan | null;
   isCurrentUserBanned: boolean;
   checkBanStatus: () => Promise<void>;
@@ -37,6 +43,8 @@ export const ModerationProvider: React.FC<ModerationProviderProps> = ({
   const { user } = useAuthStore();
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Block[]>([]);
+  const [mutedUserIds, setMutedUserIds] = useState<string[]>([]);
+  const [mutedUsers, setMutedUsers] = useState<Mute[]>([]);
   const [userBan, setUserBan] = useState<UserBan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -98,6 +106,48 @@ export const ModerationProvider: React.FC<ModerationProviderProps> = ({
     [user?.id]
   );
 
+  // Check if a user is muted
+  const isUserMuted = useCallback(
+    (userId: string): boolean => {
+      return mutedUserIds.includes(userId);
+    },
+    [mutedUserIds]
+  );
+
+  // Mute a user
+  const muteUser = useCallback(
+    async (mutedId: string) => {
+      if (!user?.id) throw new Error('User not authenticated');
+
+      try {
+        const mute = await muteService.muteUser(user.id, mutedId);
+        setMutedUsers(prev => [mute, ...prev]);
+        setMutedUserIds(prev => [...prev, mutedId]);
+      } catch (error) {
+        console.error('Error muting user:', error);
+        throw error;
+      }
+    },
+    [user?.id]
+  );
+
+  // Unmute a user
+  const unmuteUser = useCallback(
+    async (mutedId: string) => {
+      if (!user?.id) throw new Error('User not authenticated');
+
+      try {
+        await muteService.unmuteUser(user.id, mutedId);
+        setMutedUsers(prev => prev.filter(m => m.mutedId !== mutedId));
+        setMutedUserIds(prev => prev.filter(id => id !== mutedId));
+      } catch (error) {
+        console.error('Error unmuting user:', error);
+        throw error;
+      }
+    },
+    [user?.id]
+  );
+
   // Check ban status
   const checkBanStatus = useCallback(async () => {
     if (!user?.id) return;
@@ -110,11 +160,13 @@ export const ModerationProvider: React.FC<ModerationProviderProps> = ({
     }
   }, [user?.id]);
 
-  // Subscribe to blocked users on mount and when user changes
+  // Subscribe to blocked and muted users on mount and when user changes
   useEffect(() => {
     if (!user?.id) {
       setBlockedUserIds([]);
       setBlockedUsers([]);
+      setMutedUserIds([]);
+      setMutedUsers([]);
       setUserBan(null);
       return;
     }
@@ -123,15 +175,31 @@ export const ModerationProvider: React.FC<ModerationProviderProps> = ({
     refreshBlockedUsers();
     checkBanStatus();
 
-    // Set up real-time subscription for blocked users
-    const unsubscribe = moderationService.subscribeToBlockedUsers(
+    // Initial mutes fetch
+    muteService.getMutedUsers(user.id).then(mutes => {
+      setMutedUsers(mutes);
+      setMutedUserIds(mutes.map(m => m.mutedId));
+    }).catch(console.error);
+
+    // Real-time subscriptions
+    const unsubscribeBlocks = moderationService.subscribeToBlockedUsers(
       user.id,
       blockedIds => {
         setBlockedUserIds(blockedIds);
       }
     );
 
-    return () => unsubscribe();
+    const unsubscribeMutes = muteService.subscribeToMutedUsers(
+      user.id,
+      mutedIds => {
+        setMutedUserIds(mutedIds);
+      }
+    );
+
+    return () => {
+      unsubscribeBlocks();
+      unsubscribeMutes();
+    };
   }, [user?.id, refreshBlockedUsers, checkBanStatus]);
 
   const value: ModerationContextType = {
@@ -141,6 +209,11 @@ export const ModerationProvider: React.FC<ModerationProviderProps> = ({
     blockUser,
     unblockUser,
     refreshBlockedUsers,
+    mutedUserIds,
+    mutedUsers,
+    isUserMuted,
+    muteUser,
+    unmuteUser,
     userBan,
     isCurrentUserBanned: userBan?.isBanned ?? false,
     checkBanStatus,
