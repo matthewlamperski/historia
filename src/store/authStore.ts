@@ -408,26 +408,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const safeName =
       displayName?.trim() || email?.split('@')[0]?.trim() || 'Explorer';
 
+    // Build the new-user payload. Firestore rejects `undefined` field values
+    // outright, so we only include optional fields when they actually have
+    // a value (username, avatar). Optional empty fields like bio/location/
+    // website are simply omitted — they'll be added once the user fills
+    // them in via Edit Profile.
     const newUser: Omit<User, 'id'> = {
       name: safeName,
       email,
-      username: handle,
-      avatar: photoURL,
-      bio: undefined,
-      location: undefined,
-      website: undefined,
       followerCount: 0,
       followingCount: 0,
       postCount: 0,
       isVerified: false,
       companions: [],
       bookmarkCount: 0,
-      isPremium: false as boolean,
+      isPremium: false,
       pointsBalance: 0,
-      subscriptionStatus: 'free' as const,
+      subscriptionStatus: 'free',
       referralCode,
       createdAt: now,
       updatedAt: now,
+      ...(handle ? { username: handle } : {}),
+      ...(photoURL ? { avatar: photoURL } : {}),
     };
 
     await firestore()
