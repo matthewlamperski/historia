@@ -117,6 +117,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
+      console.error('[signInWithEmail] failed:', error?.code, error?.message, error);
       let errorMessage = 'Sign in failed';
       if (error.code === 'auth/user-not-found') {
         errorMessage = 'No account found with this email';
@@ -170,6 +171,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
       });
     } catch (error: any) {
+      console.error('[signUpWithEmail] failed:', error?.code, error?.message, error);
       let errorMessage = 'Sign up failed';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'An account already exists with this email';
@@ -177,6 +179,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         errorMessage = 'Invalid email address';
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'Password is too weak';
+      } else if (error?.message) {
+        // Surface the underlying message so we can see what's actually
+        // failing. If it's not a known Firebase Auth code, the message
+        // will tell us (Firestore error, network, etc.).
+        errorMessage = `Sign up failed: ${error.message}`;
       }
       set({ error: errorMessage, isLoading: false });
       throw new Error(errorMessage);
