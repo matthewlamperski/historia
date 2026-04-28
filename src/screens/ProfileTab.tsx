@@ -22,9 +22,18 @@ import { usePointsConfig } from '../context/PointsConfigContext';
 const ProfileTab = () => {
   const navigation = useNavigation<RootStackScreenProps<'Main'>['navigation']>();
 
-  const { user } = useAuthStore();
+  const { user, authUser } = useAuthStore();
   const currentUserId = user?.id ?? '';
   const [avatarError, setAvatarError] = useState(false);
+  // Display fallback chain: prefer the Firestore name, then the Firebase Auth
+  // displayName, then the email prefix. Avoids ever rendering "Anonymous"
+  // for a real user whose Firestore doc somehow lacks a name field.
+  const displayName =
+    user?.name ||
+    authUser?.displayName ||
+    user?.email?.split('@')[0] ||
+    authUser?.email?.split('@')[0] ||
+    'Explorer';
 
   const { posts, removePost } = useUserPosts(currentUserId);
   const { companions } = useCompanions(currentUserId, !!currentUserId);
@@ -128,7 +137,7 @@ const ProfileTab = () => {
         <View style={styles.userInfo}>
           <View style={styles.userNameRow}>
             <Text variant="h3" style={styles.userName}>
-              {user.name ?? 'Anonymous'}
+              {displayName}
             </Text>
             {user.isVerified && (
               <Icon name="badge-check" size={20} color={theme.colors.primary[500]} />

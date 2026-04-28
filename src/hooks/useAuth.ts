@@ -111,6 +111,15 @@ export const useAuth = (): UseAuthReturn => {
           const updates: Partial<User> = {};
           if (authName && authName !== userProfile.name) {
             updates.name = authName;
+          } else if (!userProfile.name) {
+            // Repair: Firestore profile somehow has no name. Try Auth's
+            // displayName, then the email prefix so the user never sees
+            // "Anonymous" on their own profile.
+            const fallback =
+              authName ||
+              firebaseUser.email?.split('@')[0] ||
+              'Explorer';
+            updates.name = fallback;
           }
           // Only apply Auth's photoURL if it's a real URL.
           if (isRemotePhoto && authPhoto !== userProfile.avatar) {

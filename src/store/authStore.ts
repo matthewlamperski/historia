@@ -376,8 +376,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Generate a unique referral code for this user
     const referralCode = await referralService.createReferralCodeForUser(userId);
 
+    // Defense-in-depth: never persist an empty `name`. Callers should pass
+    // the entered display name, but if they don't (e.g. an Apple sign-in
+    // that skipped sharing the user's name), fall back to the email prefix
+    // so the profile never reads as "Anonymous".
+    const safeName =
+      displayName?.trim() || email?.split('@')[0]?.trim() || 'Explorer';
+
     const newUser: Omit<User, 'id'> = {
-      name: displayName,
+      name: safeName,
       email,
       username: handle,
       avatar: photoURL,
