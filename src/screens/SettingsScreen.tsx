@@ -127,6 +127,13 @@ export default function SettingsScreen() {
         onPress: async () => {
           try {
             await signOut();
+            // Reset to the Map tab so the user lands somewhere sensible
+            // instead of staying on Settings (which is now backed by a
+            // signed-out Profile tab).
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Main', state: { routes: [{ name: 'Map' }] } }],
+            });
           } catch (error) {
             console.error('Error signing out:', error);
           }
