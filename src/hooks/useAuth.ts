@@ -77,8 +77,15 @@ export const useAuth = (): UseAuthReturn => {
       if (firebaseUser) {
         // If a sign-up/sign-in method is mid-flight, that method owns the
         // profile read/write. Anything we do here can race with its writes
-        // and corrupt the user's name (the bug fixed in this commit).
+        // and corrupt the user's name. Subscription init is the one
+        // exception — kick it off and bail.
         const inProgress = useAuthStore.getState().profileCreationInProgress;
+        if (inProgress) {
+          initSubscription(firebaseUser.uid);
+          setInitialized(true);
+          setLoading(false);
+          return;
+        }
 
         // User is signed in
         setAuthUser({
@@ -95,66 +102,60 @@ export const useAuth = (): UseAuthReturn => {
         const userProfile = await fetchUserProfile(firebaseUser.uid);
 
         if (userProfile) {
-          if (inProgress) {
-            // Auth method is authoritative. Just reflect what's in Firestore
-            // and let the method finish its own writes/state updates.
-            setUser(userProfile);
+          // Sync name/avatar from Firebase Auth (important for Google/Apple users).
+          // CRITICAL: only sync `photoURL` if it's a remote https URL. A local
+          // file URI in Firebase Auth photoURL was the root cause of the
+          // "avatar resets to a broken local path on every save" bug —
+          // a corrupted Auth value would propagate to Firestore here on every
+          // launch. We now also actively scrub a corrupted Firestore avatar
+          // when we detect it.
+          const authName = firebaseUser.displayName;
+          const authPhoto = firebaseUser.photoURL;
+          const isRemotePhoto =
+            typeof authPhoto === 'string' &&
+            (authPhoto.startsWith('https://') || authPhoto.startsWith('http://'));
+          const isRemoteFirestoreAvatar =
+            typeof userProfile.avatar === 'string' &&
+            (userProfile.avatar.startsWith('https://') ||
+              userProfile.avatar.startsWith('http://'));
+
+          const updates: Partial<User> = {};
+          // Only adopt Auth's name when it's clearly real and differs from
+          // Firestore. We deliberately do NOT fall back to the email prefix
+          // here — it'd permanently corrupt the doc with a synthetic name.
+          if (authName && authName !== userProfile.name) {
+            updates.name = authName;
+          }
+          // Only apply Auth's photoURL if it's a real URL.
+          if (isRemotePhoto && authPhoto !== userProfile.avatar) {
+            updates.avatar = authPhoto;
+          }
+          // Self-heal a previously-corrupted avatar field — clear it so the
+          // app falls back to the default avatar instead of a broken
+          // file:// reference. User can re-upload a fresh one.
+          if (
+            !isRemoteFirestoreAvatar &&
+            typeof userProfile.avatar === 'string' &&
+            userProfile.avatar.length > 0
+          ) {
+            updates.avatar = '';
+            // Also clear it from Firebase Auth so it doesn't re-corrupt.
+            firebaseUser
+              .updateProfile({ photoURL: '' })
+              .catch(err =>
+                console.warn('[useAuth] failed to clear Auth photoURL:', err),
+              );
+          }
+
+          if (Object.keys(updates).length > 0) {
+            firestore()
+              .collection(COLLECTIONS.USERS)
+              .doc(firebaseUser.uid)
+              .set(updates, { merge: true })
+              .catch(console.error);
+            setUser({ ...userProfile, ...updates });
           } else {
-            // Sync name/avatar from Firebase Auth (important for Google/Apple users).
-            // CRITICAL: only sync `photoURL` if it's a remote https URL. A local
-            // file URI in Firebase Auth photoURL was the root cause of the
-            // "avatar resets to a broken local path on every save" bug —
-            // a corrupted Auth value would propagate to Firestore here on every
-            // launch. We now also actively scrub a corrupted Firestore avatar
-            // when we detect it.
-            const authName = firebaseUser.displayName;
-            const authPhoto = firebaseUser.photoURL;
-            const isRemotePhoto =
-              typeof authPhoto === 'string' &&
-              (authPhoto.startsWith('https://') || authPhoto.startsWith('http://'));
-            const isRemoteFirestoreAvatar =
-              typeof userProfile.avatar === 'string' &&
-              (userProfile.avatar.startsWith('https://') ||
-                userProfile.avatar.startsWith('http://'));
-
-            const updates: Partial<User> = {};
-            // Only adopt Auth's name when it's clearly real and differs from
-            // Firestore. We deliberately do NOT fall back to the email prefix
-            // here — it'd permanently corrupt the doc with a synthetic name.
-            if (authName && authName !== userProfile.name) {
-              updates.name = authName;
-            }
-            // Only apply Auth's photoURL if it's a real URL.
-            if (isRemotePhoto && authPhoto !== userProfile.avatar) {
-              updates.avatar = authPhoto;
-            }
-            // Self-heal a previously-corrupted avatar field — clear it so the
-            // app falls back to the default avatar instead of a broken
-            // file:// reference. User can re-upload a fresh one.
-            if (
-              !isRemoteFirestoreAvatar &&
-              typeof userProfile.avatar === 'string' &&
-              userProfile.avatar.length > 0
-            ) {
-              updates.avatar = '';
-              // Also clear it from Firebase Auth so it doesn't re-corrupt.
-              firebaseUser
-                .updateProfile({ photoURL: '' })
-                .catch(err =>
-                  console.warn('[useAuth] failed to clear Auth photoURL:', err),
-                );
-            }
-
-            if (Object.keys(updates).length > 0) {
-              firestore()
-                .collection(COLLECTIONS.USERS)
-                .doc(firebaseUser.uid)
-                .set(updates, { merge: true })
-                .catch(console.error);
-              setUser({ ...userProfile, ...updates });
-            } else {
-              setUser(userProfile);
-            }
+            setUser(userProfile);
           }
 
           // Backfill referral code for accounts created before this feature was added
