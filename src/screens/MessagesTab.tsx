@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SwipeListView } from 'react-native-swipe-list-view';
-import { Text, ConversationListItem, ActionSheet } from '../components/ui';
+import { Text, ConversationListItem, ActionSheet, SignupCTA } from '../components/ui';
 import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useConversations } from '../hooks';
@@ -50,8 +50,11 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
     (conversationId: string) => {
       markAsRead(conversationId);
       const conversation = conversations.find(c => c.id === conversationId);
+      const details = Array.isArray(conversation?.participantDetails)
+        ? conversation!.participantDetails
+        : [];
       const otherUser = conversation?.type !== 'group'
-        ? conversation?.participantDetails.find(p => p.id !== currentUserId)
+        ? details.find(p => p && p.id !== currentUserId)
         : undefined;
       (navigation as any).navigate('ChatScreen', {
         conversationId,
@@ -148,6 +151,18 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
       </View>
     );
   };
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <SignupCTA
+          icon="comments"
+          title="Connect with travelers"
+          subtitle="Message companions, plan visits together, and swap stories from the road."
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

@@ -1,167 +1,55 @@
 # Notifications Cloud Function
 
-This Cloud Function sends a push notification via FCM whenever a new document is written to the `notifications` Firestore collection. Deploy it yourself from your Firebase project.
+> **Status:** Implemented as `onMessageCreate` in `functions/src/index.ts`.
 
----
+This replaces the older "fan out on `notifications/` writes" design. The
+current architecture flips the trigger source — the Cloud Function now
+**reacts to new messages directly** and does both jobs in one place:
 
-## Prerequisites
+1. Writes the in-app notification document (`notifications/{auto}`) so the
+   bell icon picks it up.
+2. Sends the FCM push to every recipient's device.
 
-1. Firebase project with Firestore, Authentication, and Cloud Messaging enabled.
-2. `firebase-tools` installed globally: `npm install -g firebase-tools`
-3. A `functions/` directory initialised in your repo (run `firebase init functions` if not).
+This keeps the client dumb: `messagingService.sendMessage()` only writes
+the message doc — it doesn't need to know notifications exist.
 
----
+## Where it lives
+- Implementation: `functions/src/index.ts` — export `onMessageCreate`
+- Trigger: `onDocumentCreated` on `conversations/{conversationId}/messages/{messageId}`
 
-## The Function
-
-Create (or add to) `functions/src/index.ts`:
-
-```typescript
-import * as admin from 'firebase-admin';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-
-// Only call initializeApp() once — skip if already done elsewhere in the file
-if (!admin.apps.length) {
-  admin.initializeApp();
+## FCM payload contract
+```ts
+{
+  notification: { title, body },
+  data: {
+    type: 'new_message',
+    conversationId,
+    senderId,
+    senderName,
+    senderAvatar?,
+    senderUsername?,
+  },
+  apns:    { payload: { aps: { sound: 'default', badge: 1, 'mutable-content': 1 } } },
+  android: { priority: 'high', notification: { channelId: 'historia_default', sound: 'default' } }
 }
-
-/**
- * Triggered whenever a new notification document is created.
- * Fetches the recipient's FCM token and sends a push notification.
- */
-export const sendCompanionNotification = onDocumentCreated(
-  'notifications/{notificationId}',
-  async (event) => {
-    const data = event.data?.data();
-    if (!data) return;
-
-    const { recipientId, senderName, type } = data;
-
-    // Look up the recipient's FCM token
-    const recipientDoc = await admin
-      .firestore()
-      .collection('users')
-      .doc(recipientId)
-      .get();
-
-    const fcmToken: string | undefined = recipientDoc.data()?.fcmToken;
-    if (!fcmToken) {
-      console.log(`No FCM token for user ${recipientId} — skipping push`);
-      return;
-    }
-
-    // Build the notification payload
-    const title =
-      type === 'companion_request'
-        ? 'New Companion Request'
-        : 'Companion Request Accepted';
-
-    const body =
-      type === 'companion_request'
-        ? `${senderName} wants to be your companion`
-        : `${senderName} accepted your companion request`;
-
-    // Send the push notification
-    await admin.messaging().send({
-      token: fcmToken,
-      notification: { title, body },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            badge: 1,
-          },
-        },
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          sound: 'default',
-        },
-      },
-    });
-
-    console.log(`Push sent to ${recipientId}: "${title}"`);
-  }
-);
 ```
+The `data` object is the deep-link surface. Clients parse `data.type` and
+route accordingly — see `src/hooks/useNotificationHandlers.ts`.
 
----
-
-## Deploy
-
+## Setup & deployment
+See the **Push Notifications (FCM)** section in
+`docs/MANUAL_SETUP_CHECKLIST.md` for the full one-time setup (APNs key,
+pod install, entitlements, Android manifest) and the deploy command:
 ```bash
-cd functions
-npm install          # or yarn
-npm run build        # compiles TypeScript
-firebase deploy --only functions:sendCompanionNotification
+cd functions && firebase deploy --only functions:onMessageCreate
 ```
 
----
-
-## iOS Native Setup
-
-Add the following to `ios/historia/Info.plist` to enable background push delivery:
-
-```xml
-<key>UIBackgroundModes</key>
-<array>
-  <string>remote-notification</string>
-</array>
-```
-
-Then run:
-
-```bash
-cd ios && bundle exec pod install && cd ..
-```
-
-In the iOS Developer Portal / Xcode, ensure **Push Notifications** and **Background Modes → Remote Notifications** capabilities are enabled for your app target.
-
-Upload your APNs key (`.p8`) or certificate to the Firebase Console under **Project Settings → Cloud Messaging → Apple app configuration**.
-
----
-
-## Android Native Setup
-
-No extra code is needed — `@react-native-firebase/messaging` auto-links and uses `google-services.json`. Ensure your `AndroidManifest.xml` contains:
-
-```xml
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-```
-
-(Required for Android 13+.)
-
----
-
-## Firestore Security Rules (add to your rules)
-
-```
-match /notifications/{notificationId} {
-  // Only the recipient may read their own notifications
-  allow read: if request.auth.uid == resource.data.recipientId;
-  // Only authenticated users may create (the companion service writes these)
-  allow create: if request.auth != null;
-  // Only the recipient may update (mark as read)
-  allow update: if request.auth.uid == resource.data.recipientId
-                && request.resource.data.diff(resource.data).affectedKeys()
-                     .hasOnly(['isRead']);
-  // No deletes via client (optional: allow recipient to delete)
-  allow delete: if request.auth.uid == resource.data.recipientId;
-}
-```
-
----
-
-## Companion Requests Security Rules (add to your rules)
-
-```
-match /companionRequests/{requestId} {
-  allow read: if request.auth.uid == resource.data.senderId
-              || request.auth.uid == resource.data.receiverId;
-  allow create: if request.auth != null
-                && request.resource.data.senderId == request.auth.uid;
-  allow update: if request.auth.uid == resource.data.senderId
-                || request.auth.uid == resource.data.receiverId;
-}
-```
+## Adding new notification types
+1. Add the new `NotificationType` value in `src/types/index.ts`.
+2. In the Cloud Function: write a new `notifications/{auto}` doc with the
+   new `type` and call `admin.messaging().send(...)` with the new
+   `data.type` value.
+3. In `src/hooks/useNotificationHandlers.ts`, add a `case` in
+   `routeFromNotification`'s switch that navigates to the right screen.
+4. In `src/screens/NotificationsScreen.tsx`, extend `getNotificationText`
+   and `renderNotification` to display the new type.

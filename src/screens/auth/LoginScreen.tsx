@@ -34,6 +34,11 @@ export const LoginScreen: React.FC<AuthStackScreenProps<'Login'>> = ({
     clearError,
   } = useAuth();
 
+  // Dismisses the modal that owns this screen (the Auth route on the main
+  // stack). Called after a successful sign-in so anonymous browsers return
+  // to wherever they were.
+  const dismissAuthModal = () => navigation.getParent()?.goBack();
+
   const handleEmailSignIn = async () => {
     setLocalError(null);
     clearError();
@@ -49,6 +54,7 @@ export const LoginScreen: React.FC<AuthStackScreenProps<'Login'>> = ({
 
     try {
       await signInWithEmail(email.trim(), password);
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }
@@ -59,6 +65,7 @@ export const LoginScreen: React.FC<AuthStackScreenProps<'Login'>> = ({
     clearError();
     try {
       await signInWithGoogle();
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }
@@ -69,6 +76,7 @@ export const LoginScreen: React.FC<AuthStackScreenProps<'Login'>> = ({
     clearError();
     try {
       await signInWithApple();
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }
@@ -76,8 +84,24 @@ export const LoginScreen: React.FC<AuthStackScreenProps<'Login'>> = ({
 
   const displayError = localError || error;
 
+  // When this screen is mounted inside the Auth modal (presented from the
+  // main stack), the parent navigator is the modal owner. Dismiss it to
+  // return to anonymous browsing.
+  const handleClose = dismissAuthModal;
+  const canClose = !!navigation.getParent();
+
   return (
     <SafeAreaView style={styles.container}>
+      {canClose && (
+        <TouchableOpacity
+          onPress={handleClose}
+          style={styles.closeButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Close"
+        >
+          <Icon name="xmark" size={20} color={theme.colors.gray[600]} />
+        </TouchableOpacity>
+      )}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -218,6 +242,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.white,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: theme.spacing.md,
+    right: theme.spacing.md,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.colors.gray[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
   },
   keyboardView: {
     flex: 1,

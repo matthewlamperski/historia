@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Text } from './Text';
 import { Post } from '../../types';
+import { PendingLandmark } from '../../hooks/useMessageInput';
 import { SelectedMedia } from '../../hooks/useImagePicker';
 import { theme } from '../../constants/theme';
 import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
@@ -21,6 +22,8 @@ interface MessageInputProps {
   onRemoveMedia: (index: number) => void;
   sharedPost?: Post | null;
   onClearSharedPost?: () => void;
+  pendingLandmark?: PendingLandmark | null;
+  onClearPendingLandmark?: () => void;
   onSend: () => void;
   canSend: boolean;
   placeholder?: string;
@@ -35,6 +38,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({
   onRemoveMedia,
   sharedPost,
   onClearSharedPost,
+  pendingLandmark,
+  onClearPendingLandmark,
   onSend,
   canSend,
   placeholder = 'Type a message...',
@@ -42,6 +47,68 @@ export const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   return (
     <View style={styles.container}>
+        {/* Pending landmark preview */}
+        {pendingLandmark && (
+          <View style={styles.landmarkPreview}>
+            <View style={styles.landmarkHeader}>
+              <FontAwesome6
+                name="location-dot"
+                size={14}
+                color={theme.colors.primary[500]}
+                iconStyle="solid"
+                style={styles.landmarkHeaderIcon}
+              />
+              <Text variant="caption" weight="medium" color="primary.500">
+                Sharing landmark
+              </Text>
+            </View>
+            <View style={styles.landmarkBody}>
+              {pendingLandmark.image ? (
+                <Image
+                  source={{ uri: pendingLandmark.image }}
+                  style={styles.landmarkThumb}
+                />
+              ) : (
+                <View style={[styles.landmarkThumb, styles.landmarkThumbPlaceholder]}>
+                  <FontAwesome6
+                    name="landmark"
+                    size={20}
+                    color={theme.colors.gray[400]}
+                    iconStyle="solid"
+                  />
+                </View>
+              )}
+              <View style={styles.landmarkText}>
+                <Text
+                  variant="label"
+                  weight="semibold"
+                  color="gray.900"
+                  numberOfLines={1}
+                >
+                  {pendingLandmark.name}
+                </Text>
+                {pendingLandmark.address ? (
+                  <Text variant="caption" color="gray.500" numberOfLines={1}>
+                    {pendingLandmark.address}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.clearLandmarkButton}
+              onPress={onClearPendingLandmark}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <FontAwesome6
+                name="xmark"
+                size={16}
+                color={theme.colors.gray[600]}
+                iconStyle="solid"
+              />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Shared post preview */}
         {sharedPost && (
           <View style={styles.sharedPostPreview}>
@@ -202,6 +269,54 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
   },
   clearSharedPostButton: {
+    position: 'absolute',
+    top: theme.spacing.xs,
+    right: theme.spacing.xs,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: theme.colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...theme.shadows.sm,
+  },
+  landmarkPreview: {
+    margin: theme.spacing.sm,
+    padding: theme.spacing.sm,
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
+    position: 'relative',
+  },
+  landmarkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+  },
+  landmarkHeaderIcon: {
+    marginRight: theme.spacing.xs,
+  },
+  landmarkBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    paddingRight: 28,
+  },
+  landmarkThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.gray[100],
+  },
+  landmarkThumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  landmarkText: {
+    flex: 1,
+  },
+  clearLandmarkButton: {
     position: 'absolute',
     top: theme.spacing.xs,
     right: theme.spacing.xs,

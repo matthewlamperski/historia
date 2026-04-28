@@ -10,15 +10,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text } from '../components/ui';
 import { ChallengeCoin } from '../components/ui/ChallengeCoin';
 import { theme } from '../constants/theme';
-import {
-  LEVELS,
-  LevelDef,
-  getLevelForPoints,
-  getNextLevel,
-  getLevelProgress,
-} from '../constants/levels';
+import { LevelDef } from '../types/points';
+import { usePointsConfig } from '../context/PointsConfigContext';
 import { RootStackScreenProps } from '../types';
 import { useAuthStore } from '../store/authStore';
+import { useSubscription } from '../hooks/useSubscription';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from '../services/firebaseConfig';
@@ -29,6 +25,14 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
   const { userId } = route.params;
   const { user: currentUser } = useAuthStore();
   const isOwnProfile = userId === currentUser?.id;
+  const { isPremium, showSubscriptionScreen } = useSubscription();
+  const {
+    config,
+    status: configStatus,
+    getLevelForPoints,
+    getNextLevel,
+    getLevelProgress,
+  } = usePointsConfig();
 
   const [points, setPoints] = useState<number>(
     isOwnProfile ? (currentUser?.pointsBalance ?? 0) : 0
@@ -63,8 +67,8 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
   }, [currentUser?.pointsBalance, isOwnProfile]);
 
   const currentLevel = getLevelForPoints(points);
-  const nextLevel = getNextLevel(currentLevel);
-  const progress = getLevelProgress(points, currentLevel);
+  const nextLevel = currentLevel ? getNextLevel(currentLevel) : null;
+  const progress = currentLevel ? getLevelProgress(points, currentLevel) : 0;
   const progressPct = Math.round(progress * 100);
 
   // Always derive the logged-in user's own level for the "YOU" badge,
@@ -72,11 +76,44 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
   const myPoints = currentUser?.pointsBalance ?? 0;
   const myLevel = getLevelForPoints(myPoints);
 
-  if (loading) {
+  if (loading || configStatus !== 'ready' || !config || !currentLevel) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ─── Premium gate: defense in depth ───
+  // Levels & badges are a Pro perk. We block free users at the screen body
+  // level (in addition to the navigation gate in ProfileTab) so deep links
+  // and any other navigation paths to this screen also enforce the gate.
+  if (!isPremium) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <View style={styles.lockContainer}>
+          <View style={styles.lockIconWrap}>
+            <Icon name="trophy" size={36} color={theme.colors.warning[500]} solid />
+          </View>
+          <Text variant="h3" weight="bold" style={styles.lockTitle}>
+            Levels & Rewards
+          </Text>
+          <Text variant="body" color="gray.600" style={styles.lockBody}>
+            Unlock achievement badges, earn levels, and redeem your points for
+            American-made gear at shophistoria.com — all with Historia Pro.
+          </Text>
+          <TouchableOpacity
+            style={styles.lockCta}
+            onPress={showSubscriptionScreen}
+            activeOpacity={0.85}
+          >
+            <Text variant="label" weight="semibold" style={styles.lockCtaText}>
+              Upgrade to Pro
+            </Text>
+            <Icon name="chevron-right" size={12} color={theme.colors.white} />
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -145,10 +182,10 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
               How to Earn Points
             </Text>
             {[
-              { icon: 'map-pin', text: 'Visit a landmark', pts: '+10 pts' },
-              { icon: 'camera', text: 'Create a post', pts: '+2 pts' },
-              { icon: 'image', text: 'Add photos to a post', pts: '+2 pts' },
-              { icon: 'user-group', text: 'Refer a companion', pts: '+25 pts each' },
+              { icon: 'map-pin', text: 'Visit a landmark', pts: `+${config.earning.siteVisitPoints} pts` },
+              { icon: 'camera', text: 'Create a post', pts: `+${config.earning.postBasePoints} pts` },
+              { icon: 'image', text: 'Add photos or videos to a post', pts: `+${config.earning.postPerMediaPoints} pts each` },
+              { icon: 'user-group', text: 'Refer a companion', pts: `+${config.earning.referralPoints} pts each` },
             ].map(item => (
               <View key={item.icon} style={styles.earnRow}>
                 <Icon name={item.icon} size={14} color={theme.colors.gray[500]} style={styles.earnIcon} />
@@ -157,7 +194,7 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
               </View>
             ))}
             <Text variant="caption" color="gray.400" style={styles.earnNote}>
-              Post points limited to 10 posts per day.
+              Post points limited to {config.earning.dailyPostCap} posts per day.
             </Text>
           </View>
         )}
@@ -167,26 +204,28 @@ export const LevelsScreen: React.FC<RootStackScreenProps<'Levels'>> = ({
           All Levels
         </Text>
 
-        {LEVELS.map((level, index) => {
-          const isCompleted = points >= (level.maxPoints ?? Infinity) && level.maxPoints !== null;
-          const isCurrent = level.id === currentLevel.id;
-          const isLocked = !isCompleted && !isCurrent;
-          const isMyLevel = level.id === myLevel.id;
+        {[...config.levels]
+          .sort((a, b) => a.order - b.order)
+          .map((level, index) => {
+            const isCompleted = points >= (level.maxPoints ?? Infinity) && level.maxPoints !== null;
+            const isCurrent = level.id === currentLevel.id;
+            const isLocked = !isCompleted && !isCurrent;
+            const isMyLevel = myLevel ? level.id === myLevel.id : false;
 
-          return (
-            <LevelRow
-              key={level.id}
-              level={level}
-              index={index}
-              isCompleted={isCompleted}
-              isCurrent={isCurrent}
-              isLocked={isLocked}
-              userPoints={points}
-              isMyLevel={isMyLevel}
-              isOwnProfile={isOwnProfile}
-            />
-          );
-        })}
+            return (
+              <LevelRow
+                key={level.id}
+                level={level}
+                index={index}
+                isCompleted={isCompleted}
+                isCurrent={isCurrent}
+                isLocked={isLocked}
+                userPoints={points}
+                isMyLevel={isMyLevel}
+                isOwnProfile={isOwnProfile}
+              />
+            );
+          })}
 
         <View style={styles.bottomPad} />
       </ScrollView>
@@ -299,20 +338,31 @@ const LevelRow: React.FC<LevelRowProps> = ({
             <Text variant="caption" weight="semibold" color="gray.600" style={styles.rewardsTitle}>
               Rewards
             </Text>
-            {level.rewards.map((reward, i) => (
-              <View key={i} style={styles.rewardRow}>
+            {level.rewards.map(reward => (
+              <View key={reward.id} style={styles.rewardRow}>
                 <Icon
                   name="gift"
                   size={12}
                   color={isLocked ? theme.colors.gray[300] : level.color}
                   style={styles.rewardIcon}
                 />
-                <Text
-                  variant="caption"
-                  style={[styles.rewardText, isLocked && styles.textLocked]}
-                >
-                  {reward}
-                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    variant="caption"
+                    style={[styles.rewardText, isLocked && styles.textLocked]}
+                  >
+                    {reward.title}
+                  </Text>
+                  {reward.description ? (
+                    <Text
+                      variant="caption"
+                      color="gray.400"
+                      style={[styles.rewardText, isLocked && styles.textLocked]}
+                    >
+                      {reward.description}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
             ))}
             {isCompleted && (
@@ -534,6 +584,45 @@ const styles = StyleSheet.create({
     flex: 1,
     color: theme.colors.success[700],
     fontSize: 11,
+  },
+  lockContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.xl,
+    gap: theme.spacing.md,
+  },
+  lockIconWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: theme.colors.warning[50],
+    borderWidth: 2,
+    borderColor: theme.colors.warning[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  lockTitle: {
+    color: theme.colors.gray[900],
+    textAlign: 'center',
+  },
+  lockBody: {
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: theme.spacing.md,
+  },
+  lockCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary[500],
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xl,
+    borderRadius: theme.borderRadius.full,
+    gap: 6,
+  },
+  lockCtaText: {
+    color: theme.colors.white,
   },
   bottomPad: {
     height: theme.spacing.xl,

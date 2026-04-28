@@ -12,6 +12,7 @@ import { Visit, Landmark } from '../types';
 import { getDistance } from 'geolib';
 import { landmarksService } from './landmarksService';
 import { pointsService } from './pointsService';
+import { getEarning } from './pointsConfigCache';
 
 // Verification radius in meters (100m)
 const VERIFICATION_RADIUS = 100;
@@ -101,8 +102,15 @@ class VisitsService {
         .collection(COLLECTIONS.VISITED).doc(landmarkId)
         .set({ landmarkId, visitedAt: now, createdAt: now }, { merge: true });
 
-      // Award points for the visit (non-blocking)
-      pointsService.awardPoints(userId, 20, 'site_visit').catch(console.error);
+      // Award points for the visit (non-blocking) using dynamic config
+      const earning = getEarning();
+      if (earning) {
+        pointsService
+          .awardPoints(userId, earning.siteVisitPoints, 'site_visit')
+          .catch(console.error);
+      } else {
+        console.warn('[visitsService] earning rules unavailable; visit created without point award');
+      }
 
       return {
         id: docRef.id,

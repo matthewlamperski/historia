@@ -9,6 +9,54 @@ import {
   User
 } from '../types';
 
+// Defensive Firestore doc → Conversation mapping. A single malformed doc
+// (missing fields, broken refs, weird user objects) can't be allowed to
+// crash the whole Messages tab — it returns null and the caller filters.
+// This also normalizes shape so the renderer sees consistent fields.
+const safeParseConversationDoc = (doc: any): Conversation | null => {
+  try {
+    const data = doc?.data?.();
+    if (!data) return null;
+
+    // Sanitize participantDetails: drop entries that aren't usable objects.
+    // A null/string/number here would crash ConversationListItem when it
+    // accesses .name/.avatar/etc.
+    const rawDetails = Array.isArray(data.participantDetails)
+      ? data.participantDetails
+      : [];
+    const participantDetails = rawDetails
+      .filter((u: any) => u && typeof u === 'object' && typeof u.id === 'string')
+      .map((u: any) => ({
+        ...u,
+        name: typeof u.name === 'string' && u.name.length > 0 ? u.name : 'User',
+      }));
+
+    const participants = Array.isArray(data.participants)
+      ? data.participants.filter((p: any) => typeof p === 'string')
+      : [];
+
+    const unreadCount =
+      data.unreadCount && typeof data.unreadCount === 'object'
+        ? data.unreadCount
+        : {};
+
+    return {
+      id: doc.id,
+      ...data,
+      participants,
+      participantDetails,
+      unreadCount,
+      lastMessage: typeof data.lastMessage === 'string' ? data.lastMessage : '',
+      lastMessageTimestamp: data.lastMessageTimestamp?.toDate?.() || new Date(),
+      createdAt: data.createdAt?.toDate?.() || new Date(),
+      updatedAt: data.updatedAt?.toDate?.() || new Date(),
+    } as Conversation;
+  } catch (err) {
+    console.warn('[messagingService] Skipping malformed conversation doc', doc?.id, err);
+    return null;
+  }
+};
+
 class MessagingService {
   // Emoji-only detection
   private isEmojiOnly(text: string): boolean {
@@ -44,16 +92,9 @@ class MessagingService {
 
       const snapshot = await query.get();
 
-      const conversations = snapshot.docs.map((doc: any) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          lastMessageTimestamp: data.lastMessageTimestamp?.toDate() || new Date(),
-          createdAt: data.createdAt?.toDate() || new Date(),
-          updatedAt: data.updatedAt?.toDate() || new Date(),
-        } as Conversation;
-      });
+      const conversations = snapshot.docs
+        .map((doc: any) => safeParseConversationDoc(doc))
+        .filter((c): c is Conversation => c !== null);
 
       return this.hydrateConversations(conversations);
     } catch (error) {
@@ -282,6 +323,7 @@ class MessagingService {
         images: data.images || [],
         videos: data.videos || [],
         postReference: data.postReference || null,
+        landmarkReference: data.landmarkReference || null,
         likes: [],
         isEmojiOnly: this.isEmojiOnly(data.text),
         readBy: [senderId],
@@ -303,9 +345,11 @@ class MessagingService {
       const hasVideos = videos.length > 0;
       const previewText = hasText
         ? newMessage.text.trim()
-        : hasVideos
-          ? (videos.length === 1 ? 'Video' : `${videos.length} Videos`)
-          : (hasImages ? (images.length === 1 ? 'Photo' : `${images.length} Photos`) : '');
+        : newMessage.landmarkReference
+          ? `📍 ${newMessage.landmarkReference.name}`
+          : hasVideos
+            ? (videos.length === 1 ? 'Video' : `${videos.length} Videos`)
+            : (hasImages ? (images.length === 1 ? 'Photo' : `${images.length} Photos`) : '');
       const previewType: 'text' | 'image' = (hasImages || hasVideos) && !hasText ? 'image' : 'text';
 
       await this.updateConversationLastMessage(data.conversationId, {
@@ -529,16 +573,9 @@ class MessagingService {
         .limit(20)
         .onSnapshot(
           async (snapshot: any) => {
-            const conversations = snapshot.docs.map((doc: any) => {
-              const data = doc.data();
-              return {
-                id: doc.id,
-                ...data,
-                lastMessageTimestamp: data.lastMessageTimestamp?.toDate() || new Date(),
-                createdAt: data.createdAt?.toDate() || new Date(),
-                updatedAt: data.updatedAt?.toDate() || new Date(),
-              } as Conversation;
-            });
+            const conversations = snapshot.docs
+              .map((doc: any) => safeParseConversationDoc(doc))
+              .filter((c: Conversation | null): c is Conversation => c !== null);
 
             const hydrated = await this.hydrateConversations(conversations);
             callback(hydrated);

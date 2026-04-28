@@ -9,15 +9,15 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button, Post } from '../components/ui';
+import { Text, Button, Post, SignupCTA } from '../components/ui';
 import { ChallengeCoin } from '../components/ui/ChallengeCoin';
 import { theme } from '../constants/theme';
 import { useNavigation } from '@react-navigation/native';
 import { RootStackScreenProps, Post as PostType } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
-import { useVisits, useSubscription, useNotifications, useFCMToken, useReferral, useUserPosts, useCompanions } from '../hooks';
+import { useVisits, useSubscription, useNotifications, useReferral, useUserPosts, useCompanions } from '../hooks';
 import { useAuthStore } from '../store/authStore';
-import { getLevelForPoints, getNextLevel } from '../constants/levels';
+import { usePointsConfig } from '../context/PointsConfigContext';
 
 const ProfileTab = () => {
   const navigation = useNavigation<RootStackScreenProps<'Main'>['navigation']>();
@@ -32,8 +32,8 @@ const ProfileTab = () => {
   const { visits } = useVisits(currentUserId, !!currentUserId);
   const { isPremium, isOnTrial, showSubscriptionScreen } = useSubscription();
   const { unreadCount } = useNotifications(currentUserId);
-  useFCMToken(currentUserId);
   const { referralCode, referralCount, isSharing, shareReferralLink } = useReferral();
+  const { getLevelForPoints, getNextLevel, status: pointsConfigStatus } = usePointsConfig();
 
   const handleEditProfile = useCallback(() => {
     navigation.navigate('EditProfile');
@@ -77,9 +77,11 @@ const ProfileTab = () => {
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-        </View>
+        <SignupCTA
+          icon="user"
+          title="Track your historia"
+          subtitle="Check in to landmarks, earn levels, save bookmarks, and build your travel journal."
+        />
       </SafeAreaView>
     );
   }
@@ -215,14 +217,20 @@ const ProfileTab = () => {
 
       {/* Points & Level Card — shown for all users */}
       {(() => {
+        if (pointsConfigStatus !== 'ready') return null;
         const pts = user.pointsBalance ?? 0;
         const level = getLevelForPoints(pts);
+        if (!level) return null;
         const next = getNextLevel(level);
         const ptsToNext = next ? next.minPoints - pts : null;
         return (
           <TouchableOpacity
             style={[styles.pointsCard, { borderColor: level.color }]}
-            onPress={() => navigation.navigate('Levels', { userId: currentUserId })}
+            onPress={() =>
+              isPremium
+                ? navigation.navigate('Levels', { userId: currentUserId })
+                : showSubscriptionScreen()
+            }
             activeOpacity={0.85}
           >
             <ChallengeCoin level={level} size="lg" />
@@ -445,7 +453,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#0A3161',
+    backgroundColor: '#2f80ed',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 3,

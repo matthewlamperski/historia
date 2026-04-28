@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Post, ActionSheet, ReportModal } from '../components/ui';
-import { LevelBadge } from '../components/ui/LevelBadge';
+import { LevelTag } from '../components/ui/LevelTag';
 import { ActionSheetOption } from '../components/ui/ActionSheet';
 import { theme } from '../constants/theme';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -470,9 +470,9 @@ const ProfileView = () => {
                 @{user.username}
               </Text>
             ) : null}
-            <LevelBadge
+            <LevelTag
               points={user.pointsBalance ?? 0}
-              userId={userId}
+              isPremium={user.isPremium ?? false}
               style={styles.levelBadge}
             />
             {user.location ? (

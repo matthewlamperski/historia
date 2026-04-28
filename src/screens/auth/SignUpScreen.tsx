@@ -55,6 +55,11 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
     return null;
   };
 
+  // Dismisses the modal that owns this screen (the Auth route on the main
+  // stack). Called after a successful sign-up so anonymous browsers return
+  // to wherever they were.
+  const dismissAuthModal = () => navigation.getParent()?.goBack();
+
   const handleSignUp = async () => {
     setLocalError(null);
     clearError();
@@ -91,6 +96,7 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
       }
 
       await signUpWithEmail(email.trim(), password, displayName.trim());
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }
@@ -101,6 +107,7 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
     clearError();
     try {
       await signInWithGoogle();
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }
@@ -111,6 +118,7 @@ export const SignUpScreen: React.FC<AuthStackScreenProps<'SignUp'>> = ({
     clearError();
     try {
       await signInWithApple();
+      dismissAuthModal();
     } catch (e) {
       // Error is handled in the store
     }

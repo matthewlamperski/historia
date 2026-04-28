@@ -10,14 +10,20 @@ import {
   ActivityIndicator,
   ScrollView,
   FlatList,
+  Alert,
 } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { Landmark } from '../../types';
 import { theme } from '../../constants/theme';
 import { useAuthStore } from '../../store/authStore';
+import { useRequireAuth } from '../../hooks/useRequireAuth';
+import { useSubscription } from '../../hooks/useSubscription';
 import { useJournal } from '../../hooks/useJournal';
 import { JournalModal } from './JournalModal';
+import { AskBedeCard } from './AskBedeCard';
+import { LandmarkEditModal } from './LandmarkEditModal';
+import { isAdminUid } from '../../utils/admin';
 
 const { width: screenWidth } = Dimensions.get('window');
 const IMAGE_HEIGHT = 220;
@@ -40,10 +46,19 @@ export interface LandmarkDetailSheetProps {
   onVisit: () => void;
   onDirections: () => void;
   onSaveOffline: () => void;
+  onShare?: () => void;
+  onAskBede?: () => void;
   isOfflineSaved: boolean;
   offlineDownloadProgress?: number;
   isEnriching?: boolean;
   standalone?: boolean;
+  onDelete?: () => Promise<void>;
+  /**
+   * Admin-only. Called after the edit modal successfully saves to Firestore —
+   * parent should update whatever local state it holds so the sheet re-renders
+   * with the new values.
+   */
+  onLandmarkUpdated?: (updated: Landmark) => void;
 }
 
 // ── Image carousel ────────────────────────────────────────────────────────────
@@ -192,18 +207,58 @@ const LandmarkDetailSheet = ({
   onVisit,
   onDirections,
   onSaveOffline,
+  onShare,
+  onAskBede,
   isOfflineSaved,
   offlineDownloadProgress,
   isEnriching = false,
   standalone = false,
+  onDelete,
+  onLandmarkUpdated,
 }: LandmarkDetailSheetProps) => {
   const ScrollContainer = standalone ? ScrollView : BottomSheetScrollView;
   const { user } = useAuthStore();
+  const { isPremium, requirePremium } = useSubscription();
+  const requireAuth = useRequireAuth();
   const { entry, loading: journalLoading, saving: journalSaving, loadEntry, saveEntry } =
     useJournal(user?.id ?? '');
 
   const [journalVisible, setJournalVisible] = useState(false);
+
+  // Gratitude Journal is a Pro feature. Anon users get prompted to sign in
+  // first; signed-in free users get routed to the Subscription screen.
+  const handleJournalTap = useCallback(() => {
+    if (!requireAuth()) return;
+    requirePremium('GRATITUDE_REFLECTIONS', () => setJournalVisible(true));
+  }, [requireAuth, requirePremium]);
   const [hoursExpanded, setHoursExpanded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isAdmin = isAdminUid(user?.id);
+  const [editVisible, setEditVisible] = useState(false);
+
+  const handleDelete = useCallback(() => {
+    Alert.alert(
+      'Delete Landmark',
+      `Are you sure you want to permanently delete "${landmark.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!onDelete) return;
+            setDeleting(true);
+            try {
+              await onDelete();
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [landmark.name, onDelete]);
 
   useEffect(() => {
     if (user?.id && landmark.id) loadEntry(landmark.id);
@@ -278,16 +333,31 @@ const LandmarkDetailSheet = ({
             </>
           )}
         </TouchableOpacity>
+
+        {onShare && (
+          <TouchableOpacity style={styles.actionBtn} onPress={onShare}>
+            <Icon name="share-nodes" size={15} color={theme.colors.primary[600]} />
+            <Text style={styles.actionBtnText}>Share</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.content}>
         {/* ── Title + category ────────────────────────────────────── */}
         <View style={styles.titleRow}>
           <Text style={styles.title}>{landmark.name}</Text>
-          <View style={[styles.badge, { backgroundColor: getCategoryColor(landmark.category) }]}>
-            <Text style={styles.badgeText}>
-              {landmark.category?.toUpperCase() ?? 'LANDMARK'}
-            </Text>
+          <View style={styles.badgeStack}>
+            {hasVisited && (
+              <View style={styles.visitedBadge}>
+                <Icon name="circle-check" size={10} color="#fff" solid />
+                <Text style={styles.visitedBadgeText}>Visited</Text>
+              </View>
+            )}
+            <View style={[styles.badge, { backgroundColor: getCategoryColor(landmark.category) }]}>
+              <Text style={styles.badgeText}>
+                {landmark.category?.toUpperCase() ?? 'LANDMARK'}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -332,6 +402,9 @@ const LandmarkDetailSheet = ({
             <InfoRow icon="wheelchair" text="Wheelchair accessible entrance" />
           )}
         </View>
+
+        {/* ── Ask Bede (AI guide) ──────────────────────────────────── */}
+        {onAskBede && <AskBedeCard onPress={onAskBede} />}
 
         {/* ── About ───────────────────────────────────────────────── */}
         {hasAbout && (
@@ -384,10 +457,53 @@ const LandmarkDetailSheet = ({
           </Text>
         </TouchableOpacity>
 
+        {/* ── Admin tools ──────────────────────────────────────────── */}
+        {isAdmin && (
+          <View style={styles.adminCard}>
+            <View style={styles.adminCardHeader}>
+              <View style={styles.adminBadge}>
+                <Icon name="shield-halved" size={10} color={theme.colors.warning[700]} solid />
+                <Text style={styles.adminBadgeText}>ADMIN ONLY</Text>
+              </View>
+              <Text style={styles.adminCardSubtitle}>
+                Visible only to you — regular users never see these controls.
+              </Text>
+            </View>
+            <View style={styles.adminToolsRow}>
+              <TouchableOpacity
+                style={styles.adminEditBtn}
+                onPress={() => setEditVisible(true)}
+                activeOpacity={0.75}
+              >
+                <Icon name="pen-to-square" size={13} color={theme.colors.primary[600]} solid />
+                <Text style={styles.adminEditBtnText}>Edit landmark</Text>
+              </TouchableOpacity>
+
+              {onDelete && (
+                <TouchableOpacity
+                  style={[styles.adminDeleteBtn, deleting && styles.deleteBtnDisabled]}
+                  onPress={handleDelete}
+                  disabled={deleting}
+                  activeOpacity={0.75}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color={theme.colors.error[600]} />
+                  ) : (
+                    <Icon name="trash" size={13} color={theme.colors.error[600]} solid />
+                  )}
+                  <Text style={styles.adminDeleteBtnText}>
+                    {deleting ? 'Deleting…' : 'Delete'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* ── Gratitude Journal ────────────────────────────────────── */}
         <TouchableOpacity
           style={styles.journalCard}
-          onPress={() => setJournalVisible(true)}
+          onPress={handleJournalTap}
           activeOpacity={0.75}
         >
           <View style={styles.journalCardHeader}>
@@ -397,13 +513,25 @@ const LandmarkDetailSheet = ({
               </View>
               <Text style={styles.journalCardTitle}>Gratitude Journal</Text>
             </View>
-            <View style={styles.journalEditPill}>
-              <Text style={styles.journalEditPillText}>{entry ? 'Edit' : 'Write'}</Text>
-              <Icon name="chevron-right" size={10} color={theme.colors.primary[500]} />
-            </View>
+            {isPremium ? (
+              <View style={styles.journalEditPill}>
+                <Text style={styles.journalEditPillText}>{entry ? 'Edit' : 'Write'}</Text>
+                <Icon name="chevron-right" size={10} color={theme.colors.primary[500]} />
+              </View>
+            ) : (
+              <View style={styles.journalProPill}>
+                <Icon name="lock" size={9} color={theme.colors.warning[700]} solid />
+                <Text style={styles.journalProPillText}>PRO</Text>
+              </View>
+            )}
           </View>
           <View style={styles.journalCardBody}>
-            {journalLoading ? (
+            {!isPremium ? (
+              <Text style={styles.journalEmpty}>
+                Reflect on the places you visit — write your thoughts, memories,
+                and what you're grateful for. Available with Historia Pro.
+              </Text>
+            ) : journalLoading ? (
               <ActivityIndicator size="small" color={theme.colors.primary[400]} style={styles.journalLoading} />
             ) : entry ? (
               <Text style={styles.journalPreview} numberOfLines={3}>{entry}</Text>
@@ -425,6 +553,15 @@ const LandmarkDetailSheet = ({
         onSave={handleJournalSave}
         onClose={() => setJournalVisible(false)}
       />
+
+      {isAdmin && (
+        <LandmarkEditModal
+          visible={editVisible}
+          landmark={landmark}
+          onClose={() => setEditVisible(false)}
+          onSaved={updated => onLandmarkUpdated?.(updated)}
+        />
+      )}
     </ScrollContainer>
   );
 };
@@ -543,12 +680,31 @@ const styles = StyleSheet.create({
     color: theme.colors.gray[900],
     marginRight: theme.spacing.sm,
   },
+  badgeStack: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 5,
+  },
   badge: {
     paddingHorizontal: theme.spacing.sm,
     paddingVertical: theme.spacing.xs,
     borderRadius: theme.borderRadius.full,
   },
   badgeText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.white,
+  },
+  visitedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: '#b74840',
+  },
+  visitedBadgeText: {
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.bold,
     color: theme.colors.white,
@@ -664,6 +820,85 @@ const styles = StyleSheet.create({
     color: theme.colors.white,
   },
 
+  // Admin tools — wrapped in a labeled card so it's unmistakable these
+  // controls are privileged and not part of the regular user UI.
+  adminCard: {
+    backgroundColor: theme.colors.warning[50],
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.warning[200],
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  adminCardHeader: {
+    gap: 6,
+  },
+  adminBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: theme.colors.warning[100],
+    borderColor: theme.colors.warning[300],
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  adminBadgeText: {
+    fontSize: 10,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.warning[700],
+    letterSpacing: 0.8,
+  },
+  adminCardSubtitle: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.warning[700],
+    opacity: 0.85,
+  },
+  adminToolsRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  adminEditBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    paddingVertical: 12,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[300],
+    backgroundColor: theme.colors.primary[50],
+  },
+  adminEditBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.primary[600],
+  },
+  adminDeleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.xs,
+    paddingVertical: 12,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.error[300],
+    backgroundColor: theme.colors.error[50],
+  },
+  adminDeleteBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.error[600],
+  },
+  deleteBtnDisabled: {
+    opacity: 0.5,
+  },
+
   // Journal
   journalCard: {
     backgroundColor: theme.colors.primary[50],
@@ -713,6 +948,21 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.medium,
     color: theme.colors.primary[600],
+  },
+  journalProPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: theme.colors.warning[100],
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+  },
+  journalProPillText: {
+    fontSize: 10,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.warning[800],
+    letterSpacing: 0.5,
   },
   journalCardBody: {
     padding: theme.spacing.md,

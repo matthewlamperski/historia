@@ -17,10 +17,19 @@ import type { FeatureCollection, Feature } from 'geojson';
 import BottomSheet, { BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import { Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
-import { useLandmarks, useVisits, useSubscription, useOfflineMaps } from '../hooks';
+import {
+  useLandmarks,
+  useVisits,
+  useSubscription,
+  useOfflineMaps,
+  useEffectiveHometown,
+  useRequireAuth,
+} from '../hooks';
 import Geolocation from 'react-native-geolocation-service';
 import { useAuthStore } from '../store/authStore';
 import LandmarkDetailSheet, { getCategoryColor } from '../components/ui/LandmarkDetailSheet';
+import { ActionSheet } from '../components/ui';
+import { useShareLandmark } from '../hooks';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
@@ -32,12 +41,32 @@ import {
   formatLandmarkDistance,
   LandmarkHit,
 } from '../services/algoliaLandmarksService';
+import {
+  loadCachedLandmarks,
+  cacheLandmarks,
+  isStale,
+  isHardStale,
+} from '../services/landmarksCacheService';
 import { landmarksService } from '../services/landmarksService';
 import { visitsService } from '../services/visitsService';
 import { enrichAndPersist } from '../services/placesEnrichmentService';
+import { isNoEnrichmentUid } from '../utils/admin';
 
 // MapLibre does not use Mapbox tokens — set null for non-Mapbox tile sources
 MapLibreGL.setAccessToken(null);
+
+/**
+ * Cheap fingerprint for the landmark set used by the cache swap guard. Sorted
+ * + joined objectIDs — equal fingerprint means same set of landmarks (this
+ * intentionally ignores per-field changes because the landmark _set_ is what
+ * drives the GeoJSON identity; field changes go through the cache mutation
+ * helpers and re-render naturally).
+ */
+const signatureFor = (hits: LandmarkHit[]): string => {
+  if (hits.length === 0) return '0';
+  const ids = hits.map(h => h.objectID).sort();
+  return `${ids.length}:${ids.join(',')}`;
+};
 
 // Convert an Algolia LandmarkHit to a GeoJSON Feature for the ShapeSource
 const landmarkHitToFeature = (hit: LandmarkHit): Feature => {
@@ -53,26 +82,21 @@ const landmarkHitToFeature = (hit: LandmarkHit): Feature => {
       category: hit.category ?? 'other',
       landmarkType: hit.landmarkType ?? '',
       shortDescription: hit.shortDescription ?? '',
-      description: hit.description ?? '',
-      historicalSignificance: hit.historicalSignificance ?? '',
       address: hit.address ?? '',
       city: hit.city ?? '',
       state: hit.state ?? '',
       yearBuilt: hit.yearBuilt ?? null,
-      visitingHours: hit.visitingHours ?? '',
       website: hit.website ?? '',
       images: JSON.stringify(hit.images ?? []),
       coordinates_lat: lat,
       coordinates_lng: lng,
-      // Places enrichment
+      // Small Places enrichment kept for the quick-preview sheet.
       populated: hit.populated ?? false,
       phone: hit.phone ?? '',
       googleMapsUri: hit.googleMapsUri ?? '',
       rating: hit.rating ?? null,
       ratingCount: hit.ratingCount ?? null,
-      openingHours: JSON.stringify(hit.openingHours ?? []),
       wheelchair: hit.wheelchair ?? null,
-      editorialSummary: hit.editorialSummary ?? '',
     },
   };
 };
@@ -114,6 +138,7 @@ const MapTab = () => {
   const { bookmarkLandmark, unbookmarkLandmark } = useLandmarks(userId, false);
   const { createVisit, hasVisited: checkVisited, verifyLocation } = useVisits(userId, false);
   const { isPremium, requirePremium } = useSubscription();
+  const requireAuth = useRequireAuth();
   const {
     downloadLandmark,
     isDownloading,
@@ -126,7 +151,8 @@ const MapTab = () => {
   const snapPoints = useMemo(() => ['35%', '60%'], []);
 
   // ── Landmark search state ────────────────────────────────────────────────────
-  const hometown = user?.hometown;
+  // Falls back to AsyncStorage for anonymous users — set during onboarding.
+  const hometown = useEffectiveHometown();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<LandmarkHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -134,15 +160,111 @@ const MapTab = () => {
   const searchInputRef = useRef<TextInput>(null);
 
   // ── Load all landmarks once on mount ────────────────────────────────────────
+  // Cache-first: if we have a fresh on-device cache, render markers in <500ms
+  // and skip the network call. Stale cache renders immediately and refreshes
+  // in the background. Cold cache falls back to today's paginated streaming.
   useEffect(() => {
     let cancelled = false;
+
+    /** Replace cached state with fresh hits, applying a swap guard so a
+     *  truncated/empty Algolia response can't wipe a healthy cache. */
+    const applyFresh = (fresh: LandmarkHit[], cachedCount: number) => {
+      if (cancelled) return;
+      if (fresh.length === 0) {
+        console.warn('[landmarks] background refresh returned 0 hits — keeping cache');
+        return;
+      }
+      if (cachedCount > 0 && fresh.length < cachedCount * 0.95) {
+        console.warn(
+          `[landmarks] background refresh shrunk by >5% (${cachedCount} → ${fresh.length}) — keeping cache`,
+        );
+        return;
+      }
+      // Cheap fingerprint: sorted objectIDs joined. Skip the swap if equal —
+      // avoids a needless GeoJSON rebuild + MapLibre re-render.
+      const cachedSig = signatureFor(allHitsRef.current);
+      const freshSig = signatureFor(fresh);
+      if (cachedSig === freshSig) return;
+
+      setAllHits(fresh);
+      cacheLandmarks(fresh).catch(err =>
+        console.warn('[landmarks] cache write failed', err),
+      );
+    };
+
+    /** Today's paginated streaming behavior — used when there's no cache to
+     *  render from. The final concatenated set is persisted at the end. */
+    const streamFromAlgolia = async () => {
+      const collected: LandmarkHit[] = [];
+      try {
+        await browseAllLandmarks(pageHits => {
+          if (cancelled) return;
+          collected.push(...pageHits);
+          setAllHits(prev => [...prev, ...pageHits]);
+        });
+        if (!cancelled && collected.length > 0) {
+          cacheLandmarks(collected).catch(err =>
+            console.warn('[landmarks] cache write failed', err),
+          );
+        }
+      } catch (e) {
+        console.error('browseAllLandmarks error:', e);
+      } finally {
+        if (!cancelled) setLandmarksLoading(false);
+      }
+    };
+
+    /** Background refresh used when we already rendered from cache. */
+    const refreshInBackground = async (cachedCount: number) => {
+      try {
+        const collected: LandmarkHit[] = [];
+        await browseAllLandmarks(pageHits => {
+          collected.push(...pageHits);
+        });
+        applyFresh(collected, cachedCount);
+      } catch (e) {
+        console.warn('[landmarks] background refresh failed', e);
+      }
+    };
+
     setLandmarksLoading(true);
-    browseAllLandmarks()
-      .then(hits => { if (!cancelled) setAllHits(hits); })
-      .catch(e => console.error('browseAllLandmarks error:', e))
-      .finally(() => { if (!cancelled) setLandmarksLoading(false); });
-    return () => { cancelled = true; };
+
+    loadCachedLandmarks()
+      .then(cached => {
+        if (cancelled) return;
+
+        if (cached && cached.hits.length > 0) {
+          // Render from cache immediately
+          setAllHits(cached.hits);
+          setLandmarksLoading(false);
+
+          const stale = isStale(cached.cachedAt);
+          const hardStale = isHardStale(cached.cachedAt);
+          if (stale || hardStale) {
+            refreshInBackground(cached.hits.length);
+          }
+          return;
+        }
+
+        // No cache — stream from Algolia as today
+        streamFromAlgolia();
+      })
+      .catch(err => {
+        console.warn('[landmarks] cache read failed, falling back to network', err);
+        if (!cancelled) streamFromAlgolia();
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mirror `allHits` into a ref so the swap guard's fingerprint check sees
+  // the latest value without retriggering the load effect.
+  const allHitsRef = useRef<LandmarkHit[]>([]);
+  useEffect(() => {
+    allHitsRef.current = allHits;
+  }, [allHits]);
 
   // Bookmark/visit ID sets — loaded from subcollections, updated locally on action
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
@@ -159,17 +281,31 @@ const MapTab = () => {
     }).catch(console.error);
   }, [userId]);
 
+  // Deterministic reveal tier (0..19) per landmark — stable cheap hash of
+  // objectID. Used to progressively unlock icons as the user zooms in.
+  // tier === 0 is also the "featured" ~5% that gets a brown highlight circle.
+  const tierFor = useCallback((id: string): number => {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) {
+      h = (h * 31 + id.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h) % 20;
+  }, []);
+
   // Recompute GeoJSON whenever hits, bookmarks, or visits change
   const allLandmarksGeoJSON = useMemo<FeatureCollection>(() => ({
     type: 'FeatureCollection',
     features: allHits.map(hit => {
       const f = landmarkHitToFeature(hit);
+      const tier = tierFor(hit.objectID);
       // Use 1/0 instead of booleans — boolean literals are unreliable across the JS→native bridge
       f.properties!.bookmarked = bookmarkedIds.has(hit.objectID) ? 1 : 0;
       f.properties!.visited = visitedIds.has(hit.objectID) ? 1 : 0;
+      f.properties!.featured = tier === 0 ? 1 : 0;
+      f.properties!.tier = tier;
       return f;
     }),
-  }), [allHits, bookmarkedIds, visitedIds]);
+  }), [allHits, bookmarkedIds, visitedIds, tierFor]);
 
 
   // Load FA6 solid icons into MapLibre's image atlas.
@@ -222,13 +358,19 @@ const MapTab = () => {
   const handleMarkerPress = useCallback(
     async (landmark: Landmark) => {
       setSelectedLandmark(landmark);
-      bottomSheetRef.current?.expand();
+      // Expand is deferred to a useEffect below so the sheet's children are
+      // committed before the native expand animation runs. The very first tap
+      // would otherwise no-op because the BottomSheet's child (`LandmarkDetailSheet`)
+      // is conditionally rendered on `selectedLandmark` and isn't mounted yet
+      // when `expand()` is called synchronously.
       setIsBookmarked(bookmarkedIds.has(landmark.id));
       const visited = await checkVisited(landmark.id);
       setHasVisited(visited);
 
-      // Enrich from Google Places if this landmark hasn't been populated yet
-      if (!landmark.populated) {
+      // Enrich from Google Places if this landmark hasn't been populated yet.
+      // Skip entirely for the curating-admin UIDs so they only ever see what's
+      // already on the Firestore doc and we don't make any write back.
+      if (!landmark.populated && !isNoEnrichmentUid(userId)) {
         setIsEnriching(true);
         enrichAndPersist(landmark)
           .then(updates => {
@@ -240,7 +382,7 @@ const MapTab = () => {
           .finally(() => setIsEnriching(false));
       }
     },
-    [checkVisited, bookmarkedIds],
+    [checkVisited, bookmarkedIds, userId],
   );
 
   // Select a result from Algolia search — flies camera and opens bottom sheet
@@ -294,13 +436,41 @@ const MapTab = () => {
     [handleMarkerPress]
   );
 
-  // No-op: kept so onRegionDidChange has a stable ref; no longer triggers Algolia fetches
+  // Expand the bottom sheet once React has committed the child. Calling
+  // `expand()` inside the tap handler fires before the conditionally-rendered
+  // LandmarkDetailSheet is mounted, which the BottomSheet library silently
+  // ignores — causing the first tap after app launch to appear dead.
+  // Even with a useEffect the first tap can no-op: the native sheet needs
+  // one layout pass to resolve its percentage snap points against the just-
+  // mounted child. A one-frame deferral fixes the first-tap-after-launch
+  // bug without any user-visible delay.
+  useEffect(() => {
+    if (!selectedLandmark) return;
+    const id = setTimeout(() => {
+      bottomSheetRef.current?.expand();
+    }, 16);
+    return () => clearTimeout(id);
+  }, [selectedLandmark?.id]);
+
+  // No-op: retained so onRegionDidChange has a stable ref. The built-in
+  // MapLibre compass now handles reset-to-north.
   const handleMapRegionChange = useCallback((_feature: any) => {}, []);
 
   const handleSheetClose = useCallback(() => {
     setSelectedLandmark(null);
     bottomSheetRef.current?.close();
   }, []);
+
+  const handleDeleteLandmark = useCallback(async () => {
+    if (!selectedLandmark) return;
+    const deletedId = selectedLandmark.id;
+    const deletedName = selectedLandmark.name;
+    await landmarksService.deleteLandmark(deletedId);
+    setAllHits(prev => prev.filter(h => h.objectID !== deletedId));
+    bottomSheetRef.current?.close();
+    setSelectedLandmark(null);
+    Alert.alert('Deleted', `"${deletedName}" has been deleted.`);
+  }, [selectedLandmark]);
 
   const handleShapeSourcePress = useCallback(async (event: any) => {
     const feature = event.features?.[0];
@@ -327,38 +497,46 @@ const MapTab = () => {
 
     HapticFeedback.trigger('impactMedium', { enableVibrateFallback: true, ignoreAndroidSystemSettings: false });
 
-    // Individual landmark tap — reconstruct Landmark from GeoJSON properties
-    const landmark: Landmark = {
+    // Instant quick-preview from the feature properties we already have —
+    // the long-form content was intentionally stripped from the Algolia fetch
+    // to make the map load fast. We pull it from Firestore just below.
+    const quickPreview: Landmark = {
       id: props.id,
       name: props.name,
-      description: props.description ?? '',
+      description: '',
       shortDescription: props.shortDescription ?? '',
       category: (props.category as Landmark['category']) ?? 'other',
       landmarkType: props.landmarkType || undefined,
       address: props.address ?? '',
       city: props.city || undefined,
       state: props.state || undefined,
-      historicalSignificance: props.historicalSignificance ?? '',
+      historicalSignificance: '',
       yearBuilt: props.yearBuilt ?? undefined,
-      visitingHours: props.visitingHours || undefined,
       website: props.website || undefined,
       images: (() => { try { return JSON.parse(props.images ?? '[]'); } catch { return []; } })(),
       coordinates: {
         latitude: props.coordinates_lat,
         longitude: props.coordinates_lng,
       },
-      // Places enrichment
       populated: Boolean(props.populated),
       phone: props.phone || undefined,
       googleMapsUri: props.googleMapsUri || undefined,
       rating: props.rating != null ? Number(props.rating) : undefined,
       ratingCount: props.ratingCount != null ? Number(props.ratingCount) : undefined,
-      openingHours: (() => { try { return JSON.parse(props.openingHours ?? '[]'); } catch { return []; } })(),
       wheelchair: props.wheelchair != null ? Boolean(props.wheelchair) : undefined,
-      editorialSummary: props.editorialSummary || undefined,
     };
+    handleMarkerPress(quickPreview);
+    setIsEnriching(true);
 
-    handleMarkerPress(landmark);
+    // Fetch the full record from Firestore and hot-swap into the open sheet.
+    landmarksService
+      .getLandmark(props.id)
+      .then(full => {
+        if (!full) return;
+        setSelectedLandmark(prev => (prev?.id === full.id ? full : prev));
+      })
+      .catch(err => console.warn('getLandmark (post-tap enrich) failed:', err))
+      .finally(() => setIsEnriching(false));
   }, [handleMarkerPress]);
 
   const renderBackdrop = useCallback(
@@ -375,7 +553,8 @@ const MapTab = () => {
 
   // Bookmark toggle
   const handleBookmark = useCallback(async () => {
-    if (!selectedLandmark || !userId) return;
+    if (!selectedLandmark) return;
+    if (!requireAuth()) return;
 
     if (isBookmarked) {
       try {
@@ -403,13 +582,14 @@ const MapTab = () => {
       console.error('Error bookmarking landmark:', err);
     }
   }, [
-    selectedLandmark, userId, isBookmarked, bookmarkLandmark, unbookmarkLandmark,
-    isPremium, requirePremium, user, updateUser, bookmarkedIds,
+    selectedLandmark, isBookmarked, bookmarkLandmark, unbookmarkLandmark,
+    isPremium, requirePremium, user, updateUser, bookmarkedIds, requireAuth,
   ]);
 
-  // Save offline — gated behind premium
+  // Save offline — gated behind premium AND auth (premium implies signed in)
   const handleSaveOffline = useCallback(() => {
     if (!selectedLandmark) return;
+    if (!requireAuth()) return;
     requirePremium('OFFLINE_MAPS', () => {
       if (isDownloading) return;
       if (isLandmarkSaved(selectedLandmark.id)) {
@@ -428,12 +608,13 @@ const MapTab = () => {
         ],
       );
     });
-  }, [selectedLandmark, requirePremium, isDownloading, isLandmarkSaved, downloadLandmark]);
+  }, [selectedLandmark, requirePremium, isDownloading, isLandmarkSaved, downloadLandmark, requireAuth]);
 
 
   // Visit check-in
   const handleVisit = useCallback(async () => {
     if (!selectedLandmark) return;
+    if (!requireAuth()) return;
     Geolocation.getCurrentPosition(
       async position => {
         const userLocation = {
@@ -456,7 +637,7 @@ const MapTab = () => {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
     );
-  }, [selectedLandmark, createVisit, verifyLocation, visitedIds]);
+  }, [selectedLandmark, createVisit, verifyLocation, visitedIds, requireAuth]);
 
   // Directions
   const handleDirections = useCallback(() => {
@@ -464,6 +645,15 @@ const MapTab = () => {
     const { latitude, longitude } = selectedLandmark.coordinates;
     openDirections(latitude, longitude, selectedLandmark.name);
   }, [selectedLandmark]);
+
+  // Share flow (action sheet → in-app send or native share)
+  const {
+    isActionSheetVisible: shareSheetVisible,
+    openShareSheet,
+    closeShareSheet,
+    handleSendViaHistoria,
+    handleShareLink,
+  } = useShareLandmark(selectedLandmark);
 
   // Derived offline state for the selected landmark
   const selectedIsOfflineSaved = selectedLandmark
@@ -492,7 +682,10 @@ const MapTab = () => {
 
         <TouchableOpacity
           style={styles.nearbyBtn}
-          onPress={() => navigation.navigate('NearbyUsers')}
+          onPress={() => {
+            if (!requireAuth()) return;
+            navigation.navigate('NearbyUsers');
+          }}
           activeOpacity={0.75}
         >
           <Icon name="users" size={17} color={theme.colors.primary[600]} />
@@ -505,11 +698,15 @@ const MapTab = () => {
           mapStyle={OFFLINE_STYLE_URL}
           logoEnabled={false}
           attributionEnabled={false}
+          compassEnabled
+          compassViewPosition={1}
+          compassViewMargins={{ x: 16, y: 72 }}
           onRegionDidChange={handleMapRegionChange}
           onPress={dismissSearch}
         >
           <MapLibreGL.Camera
             ref={cameraRef}
+            maxZoomLevel={17}
             defaultSettings={{
               centerCoordinate: hometown
                 ? [hometown.longitude, hometown.latitude]
@@ -520,66 +717,113 @@ const MapTab = () => {
           <MapLibreGL.Images images={landmarkMapImages} />
           <MapLibreGL.UserLocation visible renderMode="native" />
 
+          {/* State / province boundaries overlay. Voyager's built-in state
+              layer is hidden below zoom 4 and nearly invisible (#d4d5d6 at
+              0.5px), so we draw our own on top of the same vector-tile source
+              the basemap already loaded — no extra tiles fetched. */}
+          <MapLibreGL.LineLayer
+            id="stateBoundariesOverlay"
+            sourceID="carto"
+            sourceLayerID="boundary"
+            filter={[
+              'all',
+              ['==', ['get', 'admin_level'], 4],
+              ['==', ['get', 'maritime'], 0],
+            ]}
+            style={{
+              lineColor: '#7a6a52',
+              lineOpacity: 0.7,
+              lineWidth: [
+                'interpolate', ['linear'], ['zoom'],
+                0, 0.6,
+                4, 0.8,
+                8, 1.2,
+                12, 1.6,
+              ],
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+
           <MapLibreGL.ShapeSource
             id="landmarksSource"
             ref={shapeSourceRef}
             shape={allLandmarksGeoJSON}
-            cluster
-            clusterRadius={40}
-            clusterMaxZoomLevel={11}
             onPress={handleShapeSourcePress}
             hitbox={{ width: 44, height: 44 }}
           >
-            {/* Cluster bubbles */}
+            {/* Regular (non-highlighted) landmark circles — small dots so they
+                don't dominate the map when a lot of them are visible. */}
             <MapLibreGL.CircleLayer
-              id="clusterCircles"
-              filter={['has', 'point_count']}
+              id="landmarkCirclesRegular"
+              filter={[
+                'all',
+                ['!=', ['get', 'visited'], 1],
+                ['!=', ['get', 'bookmarked'], 1],
+                ['!=', ['get', 'featured'], 1],
+              ]}
               style={{
-                circleColor: [
-                  'step', ['get', 'point_count'],
-                  '#927f61', 10, '#7a6a52', 50, '#625543',
-                ],
+                circleColor: '#927f61',
+                // Small at low zoom; past the icon-reveal threshold (12) they
+                // size up to match the important circles so everything looks
+                // uniform once icons are visible.
                 circleRadius: [
-                  'step', ['get', 'point_count'],
-                  20, 10, 26, 50, 34,
+                  'interpolate', ['linear'], ['zoom'],
+                  8, 2,
+                  11, 3.5,
+                  12, 12,
+                  17, 18,
                 ],
-                circleOpacity: 0.9,
-                circleStrokeWidth: 2,
+                circleStrokeWidth: [
+                  'interpolate', ['linear'], ['zoom'],
+                  8, 0.5,
+                  11, 1,
+                  12, 2,
+                ],
                 circleStrokeColor: '#ffffff',
               }}
             />
-            {/* Cluster count labels */}
-            <MapLibreGL.SymbolLayer
-              id="clusterCounts"
-              filter={['has', 'point_count']}
-              style={{
-                textField: ['get', 'point_count_abbreviated'],
-                textSize: 13,
-                textColor: '#ffffff',
-                textAllowOverlap: true,
-                textIgnorePlacement: true,
-              }}
-            />
-            {/* Circle — brick-red if visited, sage green if bookmarked, uniform brown otherwise */}
+            {/* Highlighted circles — visited (brick red), bookmarked (sage),
+                or featured (brown). Larger than regulars below zoom 12 so they
+                stand out among the tiny dots; same size from zoom 12 up. */}
             <MapLibreGL.CircleLayer
-              id="landmarkCircles"
-              filter={['!', ['has', 'point_count']]}
+              id="landmarkCirclesImportant"
+              filter={[
+                'any',
+                ['==', ['get', 'visited'], 1],
+                ['==', ['get', 'bookmarked'], 1],
+                ['==', ['get', 'featured'], 1],
+              ]}
               style={{
                 circleColor: [
                   'case',
-                  ['==', ['get', 'visited'], 1],    '#b74840', // warm brick red
-                  ['==', ['get', 'bookmarked'], 1], '#567545', // earthy sage green
-                  '#927f61',                                   // uniform app brown
+                  ['==', ['get', 'visited'], 1],    '#b74840',
+                  ['==', ['get', 'bookmarked'], 1], '#567545',
+                  '#927f61',
                 ],
-                circleRadius: 16,
-                circleStrokeWidth: 2,
+                circleRadius: [
+                  'interpolate', ['linear'], ['zoom'],
+                  8, 7,
+                  11, 10,
+                  12, 12,
+                  17, 18,
+                ],
+                circleStrokeWidth: [
+                  'interpolate', ['linear'], ['zoom'],
+                  8, 1.25,
+                  12, 2,
+                ],
                 circleStrokeColor: '#ffffff',
               }}
             />
-            {/* FA6 solid icon on top of the circle, keyed by landmarkType */}
+            {/* FA6 solid icon on top of the circle, keyed by landmarkType.
+                Icon visibility:
+                  • visited / bookmarked / featured → always visible
+                  • everyone else → fades in between zoom 11.5 → 12.5
+                This keeps the map readable when zoomed out (just colored dots
+                + a sprinkling of icons) and becomes fully icon-ed at city zoom. */}
             <MapLibreGL.SymbolLayer
               id="landmarkIcons"
-              filter={['!', ['has', 'point_count']]}
               style={{
                 iconImage: [
                   'case',
@@ -588,9 +832,60 @@ const MapTab = () => {
                   ['==', ['get', 'landmarkType'], 'manufacturer'],   'lm-manufacturer',
                   'lm-default',
                 ],
-                iconSize: 0.9,
+                iconSize: [
+                  'interpolate', ['linear'], ['zoom'],
+                  8, 0.4,
+                  12, 0.7,
+                  15, 0.9,
+                ],
                 iconAllowOverlap: true,
                 iconIgnorePlacement: true,
+                // Keep `step(zoom)` at the top level — MapLibre's RN bridge
+                // marshals this shape reliably. Nesting `interpolate(zoom)`
+                // inside a `case` crashed the native side on iOS.
+                // Tiered reveal (tier range 0..19). Icons stay hidden until
+                // roughly city-level zoom; visited/bookmarked always show.
+                iconOpacity: [
+                  'step',
+                  ['zoom'],
+                  // < 8: only visited + bookmarked
+                  [
+                    'case',
+                    ['==', ['get', 'visited'], 1], 1,
+                    ['==', ['get', 'bookmarked'], 1], 1,
+                    0,
+                  ],
+                  8,
+                  // 8–9.9 (region): +tier 0 (~5%)
+                  [
+                    'case',
+                    ['==', ['get', 'visited'], 1], 1,
+                    ['==', ['get', 'bookmarked'], 1], 1,
+                    ['<=', ['get', 'tier'], 0], 1,
+                    0,
+                  ],
+                  10,
+                  // 10–10.9 (metro): +tier ≤ 4 (~25%)
+                  [
+                    'case',
+                    ['==', ['get', 'visited'], 1], 1,
+                    ['==', ['get', 'bookmarked'], 1], 1,
+                    ['<=', ['get', 'tier'], 4], 1,
+                    0,
+                  ],
+                  11,
+                  // 11–11.9 (city): +tier ≤ 10 (~55%)
+                  [
+                    'case',
+                    ['==', ['get', 'visited'], 1], 1,
+                    ['==', ['get', 'bookmarked'], 1], 1,
+                    ['<=', ['get', 'tier'], 10], 1,
+                    0,
+                  ],
+                  12,
+                  // ≥ 12 (neighborhood): everyone
+                  1,
+                ],
               }}
             />
           </MapLibreGL.ShapeSource>
@@ -602,6 +897,7 @@ const MapTab = () => {
             <ActivityIndicator size="small" color={theme.colors.primary[500]} />
           </View>
         )}
+
 
         {/* ── Landmark search bar ─────────────────────────────────────────── */}
         <View style={styles.searchContainer}>
@@ -710,6 +1006,7 @@ const MapTab = () => {
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.bottomSheetHandle}
         containerStyle={styles.bottomSheetContainer}
+        onClose={() => setSelectedLandmark(null)}
       >
         {selectedLandmark && (
           <LandmarkDetailSheet
@@ -720,12 +1017,40 @@ const MapTab = () => {
             onVisit={handleVisit}
             onDirections={handleDirections}
             onSaveOffline={handleSaveOffline}
+            onShare={openShareSheet}
+            onAskBede={() => {
+              if (!requireAuth()) return;
+              navigation.navigate('AskBede', {
+                landmarkId: selectedLandmark.id,
+                landmarkName: selectedLandmark.name,
+              });
+            }}
+            onLandmarkUpdated={setSelectedLandmark}
             isOfflineSaved={selectedIsOfflineSaved}
             offlineDownloadProgress={selectedOfflineProgress}
             isEnriching={isEnriching}
+            onDelete={handleDeleteLandmark}
           />
         )}
       </BottomSheet>
+
+      <ActionSheet
+        visible={shareSheetVisible}
+        onClose={closeShareSheet}
+        title={selectedLandmark?.name}
+        options={[
+          {
+            label: 'Send via Historia',
+            icon: 'paper-plane',
+            onPress: handleSendViaHistoria,
+          },
+          {
+            label: 'Share link…',
+            icon: 'share-nodes',
+            onPress: handleShareLink,
+          },
+        ]}
+      />
     </View>
   );
 };

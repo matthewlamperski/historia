@@ -138,6 +138,66 @@ function buildFreeItemEmail(
 // Public API
 // ---------------------------------------------------------------------------
 
+export async function sendSubscriptionWelcomeEmail(params: {
+  email: string;
+  firstName?: string;
+  redditUrl: string;
+}): Promise<void> {
+  const { email, firstName } = params;
+  const redditUrl = params.redditUrl || 'https://www.reddit.com/r/ExploreHistoria';
+  const resend = new Resend(getResendKey());
+
+  const greeting = firstName ? `Welcome, ${firstName}!` : 'Welcome to Historia Pro!';
+  const subject = 'Welcome to Historia Pro — your adventure just leveled up';
+
+  const body = `
+    <p class="intro">
+      <strong>${greeting}</strong>
+    </p>
+    <p class="intro">
+      Thank you for subscribing to Historia Pro. Your support directly funds new
+      historic site partnerships, new gear, and features that help more people
+      connect with American history. We're thrilled to have you along for the ride.
+    </p>
+
+    <p class="intro" style="margin-bottom: 12px;"><strong>Here's everything you've unlocked:</strong></p>
+    <ul style="font-size: 15px; color: #444; line-height: 1.8; margin: 0 0 24px; padding-left: 20px;">
+      <li><strong>Points on every visit</strong> — +10 per verified check-in, +2 per post, plus December double-points.</li>
+      <li><strong>Achievement badges &amp; levels</strong> — unlock exclusive perks as you explore.</li>
+      <li><strong>Redeem for American-made gear</strong> — trade points for exclusive products at ShopHistoria.com.</li>
+      <li><strong>Unlimited bookmarks</strong> — save every site that catches your eye.</li>
+      <li><strong>Offline maps</strong> — download maps for trips without cell service.</li>
+      <li><strong>Gratitude reflections</strong> — a personal journal tied to your landmark visits.</li>
+      <li><strong>Priority support</strong> — skip the queue when you need help.</li>
+      <li><strong>Exclusive Reddit community</strong> — swap stories, tips, and trip ideas with other Pro members.</li>
+    </ul>
+
+    <div class="reward-box">
+      <p class="reward-label">Join the community</p>
+      <p class="reward-title" style="font-size: 18px;">Historia Pro on Reddit</p>
+      <div class="cta" style="margin: 12px 0 0;">
+        <a href="${redditUrl}" target="_blank">Join the subreddit &rarr;</a>
+      </div>
+    </div>
+
+    <p class="fine-print">
+      Questions or feedback? Just reply to this email — a real person reads every one.
+      We're glad you're here.
+    </p>
+  `;
+
+  const { error } = await resend.emails.send({
+    from: getFromEmail(),
+    to: email,
+    subject,
+    html: htmlShell(body),
+  });
+
+  if (error) {
+    throw new Error(`Resend error: ${JSON.stringify(error)}`);
+  }
+}
+
 export async function sendRewardEmail(params: {
   email: string;
   tier: RewardTier;

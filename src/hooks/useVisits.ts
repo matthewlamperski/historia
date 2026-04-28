@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Visit } from '../types';
 import { visitsService } from '../services';
 import { useToast } from './useToast';
+import { usePointsConfig } from '../context/PointsConfigContext';
+import { useSubscription } from './useSubscription';
 
 export interface UseVisitsReturn {
   visits: Visit[];
@@ -29,6 +31,8 @@ export const useVisits = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
+  const { config: pointsConfig, status: pointsConfigStatus } = usePointsConfig();
+  const { isPremium } = useSubscription();
 
   const getUserVisits = useCallback(async () => {
     try {
@@ -64,7 +68,22 @@ export const useVisits = (
         );
 
         setVisits(prev => [visit, ...prev]);
-        showToast('Check-in successful!', 'success');
+
+        const earned =
+          pointsConfigStatus === 'ready' && pointsConfig
+            ? pointsConfig.earning.siteVisitPoints
+            : 0;
+
+        if (earned > 0 && !isPremium) {
+          showToast(
+            `Check-in successful — +${earned} pts. Upgrade to Pro to redeem.`,
+            'success',
+          );
+        } else if (earned > 0) {
+          showToast(`Check-in successful — +${earned} pts`, 'success');
+        } else {
+          showToast('Check-in successful!', 'success');
+        }
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'Failed to check in';
@@ -72,7 +91,7 @@ export const useVisits = (
         throw err;
       }
     },
-    [userId, showToast]
+    [userId, showToast, pointsConfig, pointsConfigStatus, isPremium]
   );
 
   const hasVisited = useCallback(

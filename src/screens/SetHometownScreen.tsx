@@ -21,6 +21,7 @@ import { Button } from '../components/ui/Button';
 import { theme } from '../constants/theme';
 import { useAuthStore } from '../store/authStore';
 import { userService } from '../services/userService';
+import { useAnonymousHometownStore } from '../hooks/useAnonymousHometown';
 import { GOOGLE_PLACES_API_KEY } from '../constants/googlePlaces';
 import { OFFLINE_STYLE_URL } from '../services/offlineMapService';
 
@@ -41,6 +42,7 @@ interface PlacePrediction {
 
 const SetHometownScreen: React.FC = () => {
   const { user, updateUser } = useAuthStore();
+  const setAnonHometown = useAnonymousHometownStore(s => s.setHometown);
   const navigationCtx = useContext(NavigationContext);
 
   const cameraRef = useRef<any>(null);
@@ -270,7 +272,6 @@ const SetHometownScreen: React.FC = () => {
   // ── Save ──────────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!user?.id) return;
     if (!selectedCityName) {
       Alert.alert('Select a Location', 'Please search for a city or drag the map to set your hometown.');
       return;
@@ -279,10 +280,18 @@ const SetHometownScreen: React.FC = () => {
     const [lng, lat] = selectedCoord;
     const hometown = { latitude: lat, longitude: lng, city: selectedCityName };
     try {
-      await userService.updateHometown(user.id, hometown);
-      updateUser({ hometown });
-      // If inside a navigator stack, go back. Otherwise the authStore update
-      // causes RootNavigator to switch to the main app automatically.
+      if (user?.id) {
+        // Authenticated user — persist to Firestore + auth store.
+        await userService.updateHometown(user.id, hometown);
+        updateUser({ hometown });
+      }
+      // Always mirror to AsyncStorage. Anonymous users need it for the
+      // RootNavigator gate to clear; authenticated users benefit from a
+      // local copy that survives signout (no re-onboarding required).
+      await setAnonHometown(hometown);
+      // If inside a navigator stack, go back. Otherwise the authStore /
+      // anonymous-hometown update causes RootNavigator to switch to the
+      // main app automatically.
       if (navigationCtx?.canGoBack()) {
         navigationCtx.goBack();
       }
@@ -295,7 +304,7 @@ const SetHometownScreen: React.FC = () => {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

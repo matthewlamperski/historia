@@ -34,13 +34,14 @@ class PointsService {
   }
 
   /**
-   * Returns true if this user has posted fewer than 10 times today
-   * (i.e., can still earn post points).
+   * Returns true if this user has posted fewer than `dailyCap` times today
+   * (i.e., can still earn post points). The cap is sourced from the dynamic
+   * points config; callers should pass it in.
    */
-  async canEarnPostPoints(userId: string): Promise<boolean> {
+  async canEarnPostPoints(userId: string, dailyCap: number): Promise<boolean> {
     try {
       const count = await this.getTodayPostCount(userId);
-      return count < 10;
+      return count < dailyCap;
     } catch {
       // If the query fails (e.g., missing index), be permissive
       return true;

@@ -69,7 +69,18 @@ const NotificationsScreen = () => {
       if (!notification.isRead) {
         await markAsRead(notification.id);
       }
-      // Navigate to the sender's profile
+      if (notification.type === 'new_message') {
+        // For message notifications, referenceId is the conversationId
+        navigation.navigate('ChatScreen', {
+          conversationId: notification.referenceId,
+          otherUserId: notification.senderId,
+          otherUserName: notification.senderName,
+          otherUserAvatar: notification.senderAvatar,
+          otherUserUsername: notification.senderUsername,
+        });
+        return;
+      }
+      // Default: open the sender's profile (companion notifications)
       navigation.navigate('ProfileView', { userId: notification.senderId });
     },
     [markAsRead, navigation]
@@ -104,6 +115,10 @@ const NotificationsScreen = () => {
         return `${name} sent you a companion request`;
       case 'companion_accepted':
         return `${name} accepted your companion request`;
+      case 'new_message':
+        return notification.previewText
+          ? `${name}: ${notification.previewText}`
+          : `${name} sent you a message`;
       default:
         return `New notification from ${name}`;
     }
@@ -112,6 +127,22 @@ const NotificationsScreen = () => {
   const renderNotification = useCallback(
     ({ item }: { item: AppNotification }) => {
       const isRequest = item.type === 'companion_request';
+      const isMessage = item.type === 'new_message';
+      const badgeIcon = isRequest
+        ? 'user-plus'
+        : isMessage
+          ? 'comment'
+          : 'user-check';
+      const bodyTail =
+        item.type === 'companion_request'
+          ? ' sent you a companion request'
+          : item.type === 'companion_accepted'
+            ? ' accepted your companion request'
+            : item.type === 'new_message'
+              ? item.previewText
+                ? `: ${item.previewText}`
+                : ' sent you a message'
+              : '';
       return (
         <TouchableOpacity
           style={[
@@ -133,7 +164,7 @@ const NotificationsScreen = () => {
             )}
             <View style={styles.iconBadge}>
               <Icon
-                name={isRequest ? 'user-plus' : 'user-check'}
+                name={badgeIcon}
                 size={10}
                 color={theme.colors.white}
               />
@@ -145,9 +176,7 @@ const NotificationsScreen = () => {
               <Text variant="body" weight="semibold">
                 {item.senderName}
               </Text>
-              {item.type === 'companion_request'
-                ? ' sent you a companion request'
-                : ' accepted your companion request'}
+              {bodyTail}
             </Text>
             <Text variant="caption" color="gray.400" style={styles.timeText}>
               {timeAgo(item.createdAt)}
@@ -314,7 +343,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: theme.colors.primary[500],
+    backgroundColor: '#2f80ed',
     marginTop: theme.spacing.sm,
     marginLeft: theme.spacing.sm,
   },

@@ -23,7 +23,7 @@ import {
   NearbyUserHit,
 } from '../services/algoliaUsersService';
 import { messagingService } from '../services/messagingService';
-import { getLevelForPoints } from '../constants/levels';
+import { LevelTag } from '../components/ui/LevelTag';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -40,8 +40,6 @@ interface UserCardProps {
 }
 
 const UserCard: React.FC<UserCardProps> = ({ hit, isMessaging, onPressProfile, onPressMessage }) => {
-  const points = hit.pointsBalance ?? 0;
-  const level = getLevelForPoints(points);
   const distanceM = hit._rankingInfo?.geoDistance;
 
   return (
@@ -67,13 +65,12 @@ const UserCard: React.FC<UserCardProps> = ({ hit, isMessaging, onPressProfile, o
         </Text>
 
         <View style={styles.metaRow}>
-          {/* Level badge */}
-          <View style={[styles.levelBadge, { borderColor: level.color + '55' }]}>
-            <View style={[styles.levelDot, { backgroundColor: level.color }]} />
-            <Text variant="caption" weight="semibold" style={[styles.levelName, { color: level.color }]}>
-              {level.name}
-            </Text>
-          </View>
+          {/* Level tag — only renders for Pro subscribers */}
+          <LevelTag
+            points={hit.pointsBalance}
+            isPremium={hit.isPremium}
+            size="compact"
+          />
 
           {/* Distance */}
           {distanceM != null && (
@@ -151,7 +148,14 @@ const NearbyUsersScreen: React.FC = () => {
         <TouchableOpacity
           onPress={loadNearbyUsers}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={{ marginRight: 4 }}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginRight: 4,
+          }}
         >
           <Icon name="rotate-right" size={16} color={theme.colors.primary[500]} />
         </TouchableOpacity>

@@ -2,6 +2,7 @@ import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from './firebaseConfig';
 import { Referral } from '../types';
 import { pointsService } from './pointsService';
+import { getEarning } from './pointsConfigCache';
 
 // Unambiguous alphanumeric characters (no 0/O, 1/I/L)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -94,11 +95,17 @@ class ReferralService {
         completedAt: now,
       });
 
-      // Award 20 points to both parties
-      await Promise.all([
-        pointsService.awardPoints(newUserId, 20, 'referral_bonus'),
-        pointsService.awardPoints(referrerId, 20, 'referral_bonus'),
-      ]);
+      // Award referral bonus to both parties using dynamic config; skip if
+      // the points config has not loaded yet (referral record is still saved).
+      const earning = getEarning();
+      if (earning) {
+        await Promise.all([
+          pointsService.awardPoints(newUserId, earning.referralPoints, 'referral_bonus'),
+          pointsService.awardPoints(referrerId, earning.referralPoints, 'referral_bonus'),
+        ]);
+      } else {
+        console.warn('[referralService] earning rules unavailable; referral applied without point award');
+      }
 
       return true;
     } catch (error) {

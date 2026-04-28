@@ -19,7 +19,8 @@ import { theme } from '../constants/theme';
 import { RootStackScreenProps } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useAuthStore } from '../store/authStore';
-import { userService } from '../services/userService';
+import { userService, isRemoteAvatarUrl } from '../services/userService';
+import { logClientError } from '../services/errorLogService';
 
 const FIELD_MAX = { name: 60, bio: 160, location: 80, website: 120 };
 
@@ -80,6 +81,22 @@ export const EditProfileScreen = () => {
       // Upload new avatar to Storage if user picked one
       if (pendingLocalUri) {
         resolvedAvatarUrl = await userService.uploadAvatar(user.id, pendingLocalUri, pendingBase64);
+
+        // Hard guarantee: never let a non-https URL flow into Firestore.
+        // uploadAvatar already validates this internally, but a defense layer
+        // here means a future regression in the service can't silently leak.
+        if (!isRemoteAvatarUrl(resolvedAvatarUrl)) {
+          await logClientError({
+            code: 'avatar.save.nonHttpsAfterUpload',
+            message: 'uploadAvatar returned a non-https URL — aborting save.',
+            userId: user.id,
+            context: {
+              returned: String(resolvedAvatarUrl).slice(0, 200),
+              hadBase64: !!pendingBase64,
+            },
+          });
+          throw new Error('Avatar upload finished but the result was invalid.');
+        }
       }
 
       const updates = {
@@ -97,7 +114,31 @@ export const EditProfileScreen = () => {
       navigation.goBack();
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      logClientError({
+        code: 'profile.save.failed',
+        message: 'EditProfileScreen handleSave threw.',
+        cause: error,
+        userId: user.id,
+        context: {
+          hadPendingAvatar: !!pendingLocalUri,
+          hadPendingBase64: !!pendingBase64,
+          nameLength: trimmedName.length,
+        },
+      });
+
+      // Surface the actual error so the user knows what happened. Falls back
+      // to a generic message only if the thrown value has no readable text.
+      const detail = (() => {
+        if (error instanceof Error && error.message) return error.message;
+        if (typeof error === 'string' && error) return error;
+        if (error && typeof error === 'object') {
+          const code = (error as { code?: string }).code;
+          if (code) return `Error code: ${code}`;
+        }
+        return 'Failed to save profile. Please try again.';
+      })();
+
+      Alert.alert('Could not save profile', detail);
     } finally {
       setSaving(false);
     }

@@ -24,9 +24,23 @@ const SPRING = { damping: 20, stiffness: 200 };
 interface ZoomableImageProps {
   uri: string;
   onRequestClose: () => void;
+  onSwipeNext?: () => void;
+  onSwipePrev?: () => void;
+  hasNext: boolean;
+  hasPrev: boolean;
 }
 
-const ZoomableImage: React.FC<ZoomableImageProps> = ({ uri, onRequestClose }) => {
+const SWIPE_DISTANCE_THRESHOLD = 60;
+const SWIPE_VELOCITY_THRESHOLD = 500;
+
+const ZoomableImage: React.FC<ZoomableImageProps> = ({
+  uri,
+  onRequestClose,
+  onSwipeNext,
+  onSwipePrev,
+  hasNext,
+  hasPrev,
+}) => {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -60,22 +74,51 @@ const ZoomableImage: React.FC<ZoomableImageProps> = ({ uri, onRequestClose }) =>
     .averageTouches(true)
     .onUpdate(e => {
       if (scale.value <= 1.05) {
-        // Swipe down to dismiss when not zoomed in
+        // Not zoomed — follow the finger in both axes. Horizontal for paging,
+        // vertical (down only) for swipe-to-dismiss.
+        tx.value = e.translationX;
         ty.value = Math.max(0, e.translationY);
         return;
       }
+      // Zoomed in — free pan in both axes.
       tx.value = savedTx.value + e.translationX;
       ty.value = savedTy.value + e.translationY;
     })
     .onEnd(e => {
       if (scale.value <= 1.05) {
+        const absX = Math.abs(e.translationX);
+        const absY = Math.abs(e.translationY);
+        const velX = Math.abs(e.velocityX);
+
+        // Horizontal swipe → page forward/back.
+        if (
+          absX > absY &&
+          (absX > SWIPE_DISTANCE_THRESHOLD || velX > SWIPE_VELOCITY_THRESHOLD)
+        ) {
+          if (e.translationX < 0 && hasNext && onSwipeNext) {
+            runOnJS(onSwipeNext)();
+            return;
+          }
+          if (e.translationX > 0 && hasPrev && onSwipePrev) {
+            runOnJS(onSwipePrev)();
+            return;
+          }
+          // Swipe was in a direction with no sibling — snap back.
+          tx.value = withSpring(0, SPRING);
+          ty.value = withSpring(0, SPRING);
+          return;
+        }
+
+        // Vertical swipe-down → dismiss.
         if (e.translationY > 100) {
           runOnJS(onRequestClose)();
         } else {
+          tx.value = withSpring(0, SPRING);
           ty.value = withSpring(0, SPRING);
         }
         return;
       }
+      // Zoomed — persist pan offsets.
       savedTx.value = tx.value;
       savedTy.value = ty.value;
     });
@@ -161,6 +204,10 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
           key={`${index}-${currentUri}`}
           uri={currentUri}
           onRequestClose={onClose}
+          onSwipeNext={goForward}
+          onSwipePrev={goBack}
+          hasNext={index < images.length - 1}
+          hasPrev={index > 0}
         />
 
         {/* Close button — positioned using explicit inset so it's never behind the notch */}

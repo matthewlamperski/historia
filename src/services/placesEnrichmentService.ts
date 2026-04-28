@@ -30,6 +30,7 @@ const BASE = 'https://places.googleapis.com/v1';
 const DETAIL_FIELD_MASK = [
   'displayName',
   'formattedAddress',
+  'location',
   'nationalPhoneNumber',
   'websiteUri',
   'regularOpeningHours',
@@ -105,6 +106,7 @@ function photoUrl(photoName: string, maxWidthPx = 900): string {
 
 export interface PlacesEnrichment {
   images: string[];
+  coordinates?: { latitude: number; longitude: number }; // canonical from Google Places
   phone?: string;
   website?: string;
   address?: string;
@@ -138,8 +140,19 @@ export async function fetchEnrichment(landmark: Landmark): Promise<PlacesEnrichm
       .slice(0, 6)
       .map((p: any) => photoUrl(p.name));
 
+    const placeLocation =
+      details.location &&
+      typeof details.location.latitude === 'number' &&
+      typeof details.location.longitude === 'number'
+        ? {
+            latitude: details.location.latitude as number,
+            longitude: details.location.longitude as number,
+          }
+        : undefined;
+
     return {
       images: photos,
+      coordinates: placeLocation,
       phone: details.nationalPhoneNumber,
       website: details.websiteUri,
       address: details.formattedAddress,
@@ -173,6 +186,18 @@ export async function enrichAndPersist(
   const landmarkUpdate: Partial<Landmark> = { populated: true };
 
   if (enrichment) {
+    if (enrichment.coordinates) {
+      // Persist canonical coords from Google Places. We write both shapes:
+      //   • `coordinates` is the app/Firestore representation (Landmark.coordinates)
+      //   • `_geoloc` is the Algolia geo format the Firestore → Algolia extension
+      //     consumes for radial search.
+      firestoreUpdate.coordinates = enrichment.coordinates;
+      firestoreUpdate._geoloc = {
+        lat: enrichment.coordinates.latitude,
+        lng: enrichment.coordinates.longitude,
+      };
+      landmarkUpdate.coordinates = enrichment.coordinates;
+    }
     if (enrichment.images.length > 0) {
       firestoreUpdate.images = enrichment.images;
       landmarkUpdate.images = enrichment.images;

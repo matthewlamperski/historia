@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, View, StyleSheet, ViewStyle } from 'react-native';
 import { Text } from './Text';
 import { theme } from '../../constants/theme';
-import { getLevelForPoints } from '../../constants/levels';
+import { usePointsConfig } from '../../context/PointsConfigContext';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
@@ -24,6 +24,7 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({
   disablePress = false,
 }) => {
   const navigation = useNavigation<NavProp>();
+  const { getLevelForPoints, status } = usePointsConfig();
   const level = getLevelForPoints(points);
 
   const handlePress = () => {
@@ -31,6 +32,17 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({
       navigation.navigate('Levels', { userId });
     }
   };
+
+  if (!level || status !== 'ready') {
+    return (
+      <View style={[styles.badge, style]}>
+        <View style={[styles.dot, { backgroundColor: theme.colors.gray[300] }]} />
+        <Text variant="caption" weight="semibold" style={[styles.name, { color: theme.colors.gray[400] }]}>
+          —
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <TouchableOpacity

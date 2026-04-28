@@ -6,12 +6,12 @@ This guide walks you through setting up the $1.99/month Historia Premium subscri
 
 ## Overview
 
-- **Product ID (both platforms):** `historia_premium_monthly`
+- **Product ID (both platforms):** `historia_pro_monthly`
 - **Price:** $1.99/month
-- **Trial:** 30 days free
+- **Trial:** 14 days free
 - **Library:** `react-native-iap` v12
 
-The placeholder product ID `historia_premium_monthly` is already in the code at:
+The placeholder product ID `historia_pro_monthly` is already in the code at:
 ```
 src/store/subscriptionStore.ts → PRODUCT_IDS
 ```
@@ -43,7 +43,7 @@ Replace both `ios` and `android` arrays with your real product IDs once created.
 1. Inside the group you just created, click **+** under "Subscriptions"
 2. Fill in:
    - **Reference Name:** `Historia Premium Monthly` (internal only)
-   - **Product ID:** `historia_premium_monthly` ← **This must match exactly**
+   - **Product ID:** `historia_pro_monthly` ← **This must match exactly**
 3. Click **Create**
 
 ### Step 4: Configure the Subscription
@@ -53,7 +53,7 @@ Replace both `ios` and `android` arrays with your real product IDs once created.
    - Price: **$1.99 USD** (Tier 2 in Apple's pricing matrix)
    - This auto-propagates to other currencies — review as needed
 4. Under **Free Trial**, click **+**:
-   - Duration: **30 days**
+   - Duration: **14 days**
 5. Under **Subscription Display Name** (shown to users):
    - Add at least one localization (English)
    - Display Name: `Historia Premium`
@@ -62,7 +62,7 @@ Replace both `ios` and `android` arrays with your real product IDs once created.
 ### Step 5: Submit the Product for Review
 In-app purchases must be submitted with your first app version that uses them:
 1. Go to **App Store** > **In-App Purchases** in your next app version submission
-2. Add `historia_premium_monthly` to the version
+2. Add `historia_pro_monthly` to the version
 3. Apple reviews IAPs alongside the app — approval typically takes 1–3 days
 
 ### Step 6: Enable StoreKit in Xcode (already done via react-native-iap)
@@ -97,7 +97,7 @@ In-app purchases must be submitted with your first app version that uses them:
 2. Go to **Monetize** > **Products** > **Subscriptions**
 3. Click **Create subscription**
 4. Fill in:
-   - **Product ID:** `historia_premium_monthly` ← **Must match exactly**
+   - **Product ID:** `historia_pro_monthly` ← **Must match exactly**
    - **Name:** `Historia Premium Monthly` (displayed to users)
    - **Description:** `Unlock points, badges, offline maps, gratitude reflections, and unlimited bookmarks.`
 
@@ -107,7 +107,7 @@ In-app purchases must be submitted with your first app version that uses them:
    - **Billing period:** Monthly
    - **Price:** Set USD to $1.99, others auto-fill
 2. Under the base plan, click **+ Add free trial**
-   - **Free trial period:** 30 days
+   - **Free trial period:** 14 days
 3. Click **Activate** on the base plan
 
 ### Step 4: Add Billing Permission to AndroidManifest.xml
@@ -132,12 +132,12 @@ Once your products are approved, update the product IDs in the code:
 ```typescript
 // src/store/subscriptionStore.ts
 export const PRODUCT_IDS = {
-  ios: ['your_real_ios_product_id'],       // e.g. 'historia_premium_monthly'
-  android: ['your_real_android_product_id'], // e.g. 'historia_premium_monthly'
+  ios: ['your_real_ios_product_id'],       // e.g. 'historia_pro_monthly'
+  android: ['your_real_android_product_id'], // e.g. 'historia_pro_monthly'
 };
 ```
 
-If you used `historia_premium_monthly` as specified, no change is needed.
+If you used `historia_pro_monthly` as specified, no change is needed.
 
 ---
 
@@ -205,10 +205,10 @@ To catch subscription renewals, cancellations, and expirations:
 
 | Item | Value |
 |------|-------|
-| iOS Product ID | `historia_premium_monthly` |
-| Android Product ID | `historia_premium_monthly` |
+| iOS Product ID | `historia_pro_monthly` |
+| Android Product ID | `historia_pro_monthly` |
 | Price | $1.99/month |
-| Free Trial | 30 days |
+| Free Trial | 14 days |
 | Money-Back Guarantee | 180 days |
 | Code file for IDs | `src/store/subscriptionStore.ts` → `PRODUCT_IDS` |
 | Firestore collection | `subscriptions/{userId}` |

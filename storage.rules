@@ -1,0 +1,44 @@
+// Firebase Storage security rules — PROPOSED for the admin web app.
+//
+// IMPORTANT: this file may not match what's currently deployed. Diff
+// against the deployed rules in the Firebase console and merge before
+// deploying.
+//
+// Spec reference: docs/POINTS_ADMIN_WEBAPP_SPEC.md §8.2.
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && firestore.exists(
+             /databases/(default)/documents/admins/$(request.auth.uid)
+           );
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Level coin images — public read (they're not sensitive and the
+    // marketing site references them via the same Storage URLs).
+    match /levels/{file=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Blog hero images — public read, admin-only write.
+    match /blog/{file=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // EXISTING PATHS — placeholders. Diff against deployed rules and
+    // copy the production rules for `uploads/{userId}/...` and any
+    // other paths in here before deploying.
+  }
+}

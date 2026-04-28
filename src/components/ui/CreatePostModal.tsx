@@ -11,6 +11,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Video from 'react-native-video';
 import { Text, Button, Input } from '../ui';
 import { theme } from '../../constants/theme';
 import { useImagePicker } from '../../hooks';
@@ -159,20 +160,43 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({
 
     return (
       <View style={styles.imagesContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.imagesContent}
+        >
           {selectedMedia.map((item, index) => (
-            <View key={index} style={styles.imageWrapper}>
-              <Image source={{ uri: item.uri }} style={styles.selectedImage} />
-              {item.type === 'video' && (
-                <View style={styles.videoOverlay}>
-                  <Icon name="play" size={18} color={theme.colors.white} />
-                </View>
-              )}
+            <View key={`${item.uri}-${index}`} style={styles.imageWrapper}>
+              <View style={styles.selectedImage}>
+                {item.type === 'video' ? (
+                  <Video
+                    source={{ uri: item.uri }}
+                    style={styles.mediaFill}
+                    resizeMode="cover"
+                    paused
+                    muted
+                    repeat={false}
+                  />
+                ) : (
+                  <Image source={{ uri: item.uri }} style={styles.mediaFill} resizeMode="cover" />
+                )}
+                {item.type === 'video' && (
+                  <View style={styles.videoOverlay} pointerEvents="none">
+                    <View style={styles.playPill}>
+                      <Icon name="play" size={10} color={theme.colors.white} />
+                      <Text variant="caption" style={styles.playPillText}>
+                        Video
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity
                 style={styles.removeImageButton}
                 onPress={() => removeMedia(index)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Icon name="xmark" size={14} color={theme.colors.white} />
+                <Icon name="xmark" size={14} color={theme.colors.gray[700]} />
               </TouchableOpacity>
             </View>
           ))}
@@ -358,37 +382,59 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   imagesContainer: {
-    paddingHorizontal: theme.spacing.lg,
     paddingBottom: theme.spacing.md,
+  },
+  imagesContent: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: 10,
+    paddingRight: theme.spacing.lg + 6,
   },
   imageWrapper: {
     position: 'relative',
-    marginRight: theme.spacing.sm,
+    marginRight: theme.spacing.md,
+    paddingTop: 8,
+    paddingRight: 8,
   },
   selectedImage: {
-    width: 80,
-    height: 80,
-    borderRadius: theme.borderRadius.md,
+    width: 110,
+    height: 110,
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.gray[100],
+  },
+  mediaFill: {
+    width: '100%',
+    height: '100%',
   },
   videoOverlay: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
+    left: 6,
+    bottom: 6,
+  },
+  playPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: theme.borderRadius.md,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 4,
+  },
+  playPillText: {
+    color: theme.colors.white,
+    fontSize: 10,
+    fontWeight: theme.fontWeight.semibold,
   },
   removeImageButton: {
     position: 'absolute',
-    top: 5,
-    right: 5,
+    top: 0,
+    right: 0,
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: theme.colors.error[500],
+    backgroundColor: theme.colors.gray[200],
+    borderWidth: 1.5,
+    borderColor: theme.colors.white,
     justifyContent: 'center',
     alignItems: 'center',
   },

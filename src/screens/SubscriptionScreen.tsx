@@ -17,6 +17,8 @@ import { theme } from '../constants/theme';
 import { useSubscriptionStore } from '../store/subscriptionStore';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from '../hooks';
+import { usePointsConfig } from '../context/PointsConfigContext';
+import { EarningRules } from '../types/points';
 
 const FREE_BOOKMARK_LIMIT = 10;
 
@@ -57,50 +59,68 @@ const FeatureRow: React.FC<FeatureRowProps> = ({
   </View>
 );
 
-const PREMIUM_FEATURES: FeatureRowProps[] = [
-  {
-    icon: 'star',
-    title: 'Points on Every Visit',
-    description: '+10 pts per verified check-in, +2 pts per post, December double-points',
-    highlight: true,
-  },
-  {
-    icon: 'trophy',
-    title: 'Achievement Badges & Levels',
-    description: 'Unlock levels, exclusive badges, and level-based perks as you explore',
-    highlight: false,
-  },
-  {
-    icon: 'tag',
-    title: 'Redeem for American-Made Gear',
-    description: 'Trade points for exclusive Made in USA products via ShopHistoria.com',
-    highlight: false,
-  },
-  {
-    icon: 'bookmark',
-    title: 'Unlimited Bookmarks',
-    description: `Free accounts are limited to ${FREE_BOOKMARK_LIMIT} saved sites — go unlimited with Pro`,
-    highlight: false,
-  },
-  {
-    icon: 'map',
-    title: 'Offline Maps',
-    description: 'Download maps for trips without cell service — perfect for remote sites',
-    highlight: false,
-  },
-  {
-    icon: 'heart',
-    title: 'Gratitude Reflections',
-    description: 'Personal journal entries tied to your landmark visits',
-    highlight: false,
-  },
-  {
-    icon: 'headset',
-    title: 'Priority Support',
-    description: 'Skip the queue — get help faster when you need it',
-    highlight: false,
-  },
-];
+function buildPremiumFeatures(earning: EarningRules | null): FeatureRowProps[] {
+  const pointsDescription = earning
+    ? `+${earning.siteVisitPoints} pts per verified check-in, +${earning.postBasePoints} pts per post, +${earning.postPerMediaPoints} pt per photo or video`
+    : 'Earn points on every check-in and post — climb the ranks';
+
+  return [
+    {
+      icon: 'star',
+      title: 'Points on Every Visit',
+      description: pointsDescription,
+      highlight: true,
+    },
+    {
+      icon: 'trophy',
+      title: 'Achievement Badges & Levels',
+      description: 'Unlock levels, exclusive badges, and level-based perks as you explore',
+      highlight: false,
+    },
+    {
+      icon: 'tag',
+      title: 'Redeem for American-Made Gear',
+      description: 'Trade points for exclusive Made in USA products via ShopHistoria.com',
+      highlight: false,
+    },
+    {
+      icon: 'comments',
+      title: 'Unlimited Ask Bede',
+      description: 'Chat without limits with Bede, your AI guide to every landmark — free accounts get 10 messages per day',
+      highlight: false,
+    },
+    {
+      icon: 'bookmark',
+      title: 'Unlimited Bookmarks',
+      description: `Free accounts are limited to ${FREE_BOOKMARK_LIMIT} saved sites — go unlimited with Pro`,
+      highlight: false,
+    },
+    {
+      icon: 'map',
+      title: 'Offline Maps',
+      description: 'Download maps for trips without cell service — perfect for remote sites',
+      highlight: false,
+    },
+    {
+      icon: 'heart',
+      title: 'Gratitude Reflections',
+      description: 'Personal journal entries tied to your landmark visits',
+      highlight: false,
+    },
+    {
+      icon: 'users',
+      title: 'Exclusive Reddit Community',
+      description: 'Join a private subreddit to swap stories, tips, and trip ideas with other Pro members',
+      highlight: false,
+    },
+    {
+      icon: 'headset',
+      title: 'Priority Support',
+      description: 'Skip the queue — get help faster when you need it',
+      highlight: false,
+    },
+  ];
+}
 
 export const SubscriptionScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -115,6 +135,14 @@ export const SubscriptionScreen: React.FC = () => {
     availableProducts,
   } = useSubscriptionStore();
   const { showToast } = useToast();
+  const { config: pointsConfig, status: pointsConfigStatus } = usePointsConfig();
+  const premiumFeatures = React.useMemo(
+    () =>
+      buildPremiumFeatures(
+        pointsConfigStatus === 'ready' && pointsConfig ? pointsConfig.earning : null
+      ),
+    [pointsConfig, pointsConfigStatus]
+  );
 
   // Entrance animation
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -266,7 +294,7 @@ export const SubscriptionScreen: React.FC = () => {
           </Text>
 
           <View style={styles.featuresList}>
-            {PREMIUM_FEATURES.map((feature, index) => (
+            {premiumFeatures.map((feature, index) => (
               <FeatureRow key={index} {...feature} />
             ))}
           </View>

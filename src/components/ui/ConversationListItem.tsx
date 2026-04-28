@@ -19,12 +19,17 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
 }) => {
   const isGroup = conversation.type === 'group';
 
+  const participantDetails = Array.isArray(conversation.participantDetails)
+    ? conversation.participantDetails
+    : [];
+
   // Get other participant (for direct messages)
   const otherUser = isGroup
     ? null
-    : conversation.participantDetails.find(u => u.id !== currentUserId);
+    : participantDetails.find(u => u && u.id !== currentUserId);
 
-  const unreadCount = conversation.unreadCount[currentUserId] || 0;
+  const unreadCount =
+    (conversation.unreadCount && conversation.unreadCount[currentUserId]) || 0;
   const hasUnread = unreadCount > 0;
 
   // For direct messages, bail if other user not found
@@ -32,9 +37,17 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
     return null;
   }
 
+  const otherUserName =
+    typeof otherUser?.name === 'string' && otherUser.name.length > 0
+      ? otherUser.name
+      : 'User';
   const displayName = isGroup
     ? (conversation.name ?? 'Group')
-    : otherUser!.name;
+    : otherUserName;
+  const lastMessageTimestamp =
+    conversation.lastMessageTimestamp instanceof Date
+      ? conversation.lastMessageTimestamp
+      : new Date();
 
   return (
     <TouchableOpacity
@@ -58,7 +71,7 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarText}>
-              {otherUser!.name.charAt(0).toUpperCase()}
+              {otherUserName.charAt(0).toUpperCase()}
             </Text>
           </View>
         )}
@@ -77,7 +90,7 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
             {displayName}
           </Text>
           <Text variant="caption" color="gray.500" style={styles.timestamp}>
-            {formatDistanceToNow(conversation.lastMessageTimestamp)}
+            {formatDistanceToNow(lastMessageTimestamp)}
           </Text>
         </View>
 
@@ -153,7 +166,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: theme.colors.error[500],
+    backgroundColor: '#2f80ed',
     borderWidth: 2,
     borderColor: theme.colors.white,
   },
@@ -187,7 +200,7 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
   },
   unreadBadge: {
-    backgroundColor: theme.colors.error[500],
+    backgroundColor: '#2f80ed',
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -200,5 +213,9 @@ const styles = StyleSheet.create({
     color: theme.colors.white,
     fontSize: theme.fontSize.xs,
     fontWeight: theme.fontWeight.bold,
+    lineHeight: theme.fontSize.xs,
+    includeFontPadding: false,
+    textAlign: 'center',
+    textAlignVertical: 'center',
   },
 });

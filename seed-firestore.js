@@ -206,7 +206,7 @@ async function seed() {
       trialEndDate: null,
       subscriptionStartDate: def.isPremium ? new Date(Date.now() - 30 * DAY).toISOString() : null,
       subscriptionEndDate: def.isPremium ? new Date(Date.now() + 335 * DAY).toISOString() : null,
-      productId: def.isPremium ? 'historia_premium_monthly' : null,
+      productId: def.isPremium ? 'historia_pro_monthly' : null,
       transactionId: def.isPremium ? `demo_txn_${uid.slice(0, 8)}` : null,
       platform: def.isPremium ? 'ios' : null,
       createdAt: new Date().toISOString(),

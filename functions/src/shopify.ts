@@ -138,3 +138,95 @@ export async function createShopifyDiscount(tier: RewardTier): Promise<DiscountR
       throw new Error(`Unknown reward type: ${(tier as RewardTier).type}`);
   }
 }
+
+/**
+ * Adds (or updates) a Shopify customer and subscribes them to email marketing.
+ *
+ * Shopify treats POST /customers.json as create-or-409: if a customer with this
+ * email already exists, the API returns 422. In that case we look the customer
+ * up and PUT an update to opt them into marketing.
+ */
+export async function addShopifyCustomerToMarketing(params: {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+}): Promise<{ customerId: string; created: boolean }> {
+  const { email, firstName, lastName } = params;
+  const domain = getShopifyDomain();
+  const token = getShopifyToken();
+
+  const customerBody = {
+    customer: {
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      email_marketing_consent: {
+        state: 'subscribed',
+        opt_in_level: 'single_opt_in',
+        consent_updated_at: new Date().toISOString(),
+      },
+      tags: 'historia-pro',
+    },
+  };
+
+  const createUrl = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/customers.json`;
+  const createRes = await fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Access-Token': token,
+    },
+    body: JSON.stringify(customerBody),
+  });
+
+  if (createRes.ok) {
+    const data = (await createRes.json()) as { customer: { id: number } };
+    return { customerId: String(data.customer.id), created: true };
+  }
+
+  // 422 typically means "email already taken" — find and update instead.
+  if (createRes.status === 422) {
+    const searchUrl = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/customers/search.json?query=${encodeURIComponent(`email:${email}`)}`;
+    const searchRes = await fetch(searchUrl, {
+      headers: { 'X-Shopify-Access-Token': token },
+    });
+    if (!searchRes.ok) {
+      const text = await searchRes.text();
+      throw new Error(`Shopify customer search ${searchRes.status}: ${text}`);
+    }
+    const searchData = (await searchRes.json()) as { customers: Array<{ id: number }> };
+    const existing = searchData.customers?.[0];
+    if (!existing) {
+      const createText = await createRes.text();
+      throw new Error(`Shopify customer create returned 422 but no existing customer found: ${createText}`);
+    }
+
+    const updateUrl = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/customers/${existing.id}.json`;
+    const updateRes = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': token,
+      },
+      body: JSON.stringify({
+        customer: {
+          id: existing.id,
+          email_marketing_consent: {
+            state: 'subscribed',
+            opt_in_level: 'single_opt_in',
+            consent_updated_at: new Date().toISOString(),
+          },
+          tags: 'historia-pro',
+        },
+      }),
+    });
+    if (!updateRes.ok) {
+      const text = await updateRes.text();
+      throw new Error(`Shopify customer update ${updateRes.status}: ${text}`);
+    }
+    return { customerId: String(existing.id), created: false };
+  }
+
+  const text = await createRes.text();
+  throw new Error(`Shopify customer create ${createRes.status}: ${text}`);
+}

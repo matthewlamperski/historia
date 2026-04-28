@@ -2,6 +2,11 @@ import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from './firebaseConfig';
 import { Landmark } from '../types';
 import { getDistance } from 'geolib';
+import {
+  mutateLandmarkInCache,
+  removeLandmarkFromCache,
+} from './landmarksCacheService';
+import { LandmarkHit } from './algoliaLandmarksService';
 
 class LandmarksService {
   // Get all landmarks
@@ -59,9 +64,26 @@ class LandmarksService {
         .doc(landmarkId)
         .get();
 
-      const docData = doc.data();
-      if (!docData) return null;
-      return { id: doc.id, ...docData } as Landmark;
+      const data = doc.data();
+      if (!data) return null;
+      // Normalize coordinates across the three schemas that exist on landmark
+      // docs in the wild: the canonical `coordinates` object, flat
+      // `latitude`/`longitude` or `lat`/`lng`, and the Algolia-style `_geoloc`.
+      const lat =
+        data.coordinates?.latitude ??
+        data.latitude ??
+        data._geoloc?.lat ??
+        data.lat;
+      const lng =
+        data.coordinates?.longitude ??
+        data.longitude ??
+        data._geoloc?.lng ??
+        data.lng;
+      const coordinates =
+        Number.isFinite(lat) && Number.isFinite(lng)
+          ? { latitude: lat as number, longitude: lng as number }
+          : data.coordinates;
+      return { id: doc.id, ...data, coordinates } as Landmark;
     } catch (error) {
       console.error('Error fetching landmark:', error);
       return null;
@@ -124,6 +146,89 @@ class LandmarksService {
     } catch (error) {
       console.error('Error fetching bookmark IDs:', error);
       return [];
+    }
+  }
+
+  // Update a landmark (admin only). Accepts a partial so callers can patch
+  // whichever fields they changed without clobbering the rest of the doc.
+  // `undefined` values are converted to FieldValue.delete() so clearing an
+  // optional field in the UI actually removes it from the Firestore doc —
+  // Firestore itself rejects raw `undefined` values.
+  async updateLandmark(
+    landmarkId: string,
+    updates: Partial<Omit<Landmark, 'id'>> & {
+      // Extra coord field variants we write on save so every schema in the
+      // wild stays in sync. See LandmarkEditModal.handleSave.
+      latitude?: number;
+      longitude?: number;
+      lat?: number;
+      lng?: number;
+      _geoloc?: { lat: number; lng: number };
+    },
+  ): Promise<void> {
+    try {
+      const payload: Record<string, unknown> = {
+        updatedAt: new Date().toISOString(),
+      };
+      for (const [key, value] of Object.entries(updates)) {
+        payload[key] = value === undefined ? firestore.FieldValue.delete() : value;
+      }
+      await firestore()
+        .collection(COLLECTIONS.LANDMARKS)
+        .doc(landmarkId)
+        .set(payload, { merge: true });
+
+      // Mirror the change into the on-device landmarks cache so the admin
+      // doesn't see their own edit reverted on next launch (the Firebase
+      // Algolia extension takes a few seconds to propagate). Fire-and-forget;
+      // a cache desync is recoverable on the next refresh.
+      const cacheUpdates: Partial<LandmarkHit> = {};
+      if (updates.name !== undefined) cacheUpdates.name = updates.name;
+      if (updates.shortDescription !== undefined) {
+        cacheUpdates.shortDescription = updates.shortDescription;
+      }
+      if (updates.description !== undefined) cacheUpdates.description = updates.description;
+      if (updates.address !== undefined) cacheUpdates.address = updates.address;
+      if (updates.category !== undefined) cacheUpdates.category = updates.category;
+      if (updates.landmarkType !== undefined) cacheUpdates.landmarkType = updates.landmarkType;
+      if (updates.yearBuilt !== undefined) cacheUpdates.yearBuilt = updates.yearBuilt;
+      if (updates.images !== undefined) cacheUpdates.images = updates.images;
+      if (updates.website !== undefined) cacheUpdates.website = updates.website;
+      if (updates._geoloc !== undefined) {
+        cacheUpdates._geoloc = updates._geoloc;
+      } else if (updates.latitude !== undefined && updates.longitude !== undefined) {
+        cacheUpdates._geoloc = { lat: updates.latitude, lng: updates.longitude };
+        cacheUpdates.coordinates = {
+          latitude: updates.latitude,
+          longitude: updates.longitude,
+        };
+      }
+      if (Object.keys(cacheUpdates).length > 0) {
+        mutateLandmarkInCache(landmarkId, cacheUpdates).catch(err =>
+          console.warn('[landmarks] cache mutate failed', err),
+        );
+      }
+    } catch (error) {
+      console.error('Error updating landmark:', error);
+      throw error;
+    }
+  }
+
+  // Delete a landmark (admin only)
+  async deleteLandmark(landmarkId: string): Promise<void> {
+    try {
+      await firestore()
+        .collection(COLLECTIONS.LANDMARKS)
+        .doc(landmarkId)
+        .delete();
+
+      // Remove from the on-device cache too — fire-and-forget.
+      removeLandmarkFromCache(landmarkId).catch(err =>
+        console.warn('[landmarks] cache remove failed', err),
+      );
+    } catch (error) {
+      console.error('Error deleting landmark:', error);
+      throw error;
     }
   }
 

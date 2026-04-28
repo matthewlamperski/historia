@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,15 +6,18 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Keyboard,
+  Platform,
+  TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, Input } from '../components/ui';
 import { theme } from '../constants/theme';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { RootStackScreenProps } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useAuthStore } from '../store/authStore';
-import { useDebounce } from '../hooks';
+import { useDebounce, useToast } from '../hooks';
 import { messagingService } from '../services';
 import { ALGOLIA_APP_ID, ALGOLIA_SEARCH_ONLY_KEY, ALGOLIA_USERS_INDEX } from '../constants/algolia';
 import { algoliasearch } from 'algoliasearch';
@@ -30,12 +33,55 @@ const algoliaClient = algoliasearch(ALGOLIA_APP_ID, ALGOLIA_SEARCH_ONLY_KEY);
 
 const NewConversationScreen: React.FC = () => {
   const navigation = useNavigation<RootStackScreenProps<'NewConversation'>['navigation']>();
+  const route = useRoute<RootStackScreenProps<'NewConversation'>['route']>();
   const { user } = useAuthStore();
+  const { showToast } = useToast();
+
+  const shareLandmarkId = route.params?.shareLandmarkId;
+  const insets = useSafeAreaInsets();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const inputRef = useRef<TextInput>(null);
+
+  // Track keyboard height directly. iOS 26 + Fabric mis-positions content on
+  // autofocus + native stack; manual padding on the list keeps results visible
+  // and prevents the auto-keyboard layout race from clobbering the input.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, e => {
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Defer autofocus by one tick — autoFocus on the Input prop fires during
+  // the first render, before the screen's layout has settled, which on
+  // iOS 26 + Fabric causes the keyboard to misposition the input. Focusing
+  // imperatively after mount is reliable.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 80);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    navigation.setOptions({
+      title: shareLandmarkId ? 'Send Landmark' : 'New Message',
+    });
+  }, [navigation, shareLandmarkId]);
 
   const debouncedQuery = useDebounce(query, 300);
 
@@ -79,24 +125,33 @@ const NewConversationScreen: React.FC = () => {
 
   const handleSelectUser = useCallback(
     async (hit: UserHit) => {
-      if (!user?.id) return;
+      if (!user?.id || isSending) return;
       try {
+        setIsSending(true);
         const conversation = await messagingService.getOrCreateConversation(
           user.id,
           hit.objectID
         );
+
+        // When forwarding a landmark, hand it off to the chat composer as a
+        // pending attachment instead of auto-sending — the sender can write a
+        // note and tap Send themselves.
         navigation.replace('ChatScreen', {
           conversationId: conversation.id,
           otherUserId: hit.objectID,
           otherUserName: hit.name,
           otherUserAvatar: hit.avatar,
           otherUserUsername: hit.username,
+          ...(shareLandmarkId ? { pendingLandmarkId: shareLandmarkId } : {}),
         });
-      } catch {
+      } catch (err) {
+        console.error('Error opening conversation:', err);
         setSearchError('Could not open conversation. Please try again.');
+      } finally {
+        setIsSending(false);
       }
     },
-    [user?.id, navigation]
+    [user?.id, navigation, shareLandmarkId, isSending]
   );
 
   const renderItem = useCallback(
@@ -151,16 +206,16 @@ const NewConversationScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={[]}>
       {/* Search */}
       <View style={styles.searchSection}>
         <Input
+          ref={inputRef}
           placeholder="Search by @handle or name"
           value={query}
           onChangeText={setQuery}
           autoCapitalize="none"
           autoCorrect={false}
-          autoFocus
           containerStyle={styles.searchInput}
           leftIcon={<Icon name="magnifying-glass" size={16} color={theme.colors.gray[400]} />}
           rightIcon={
@@ -188,7 +243,13 @@ const NewConversationScreen: React.FC = () => {
         keyExtractor={item => item.objectID}
         renderItem={renderItem}
         ListEmptyComponent={renderEmpty}
-        contentContainerStyle={results.length === 0 ? styles.emptyContainer : undefined}
+        contentContainerStyle={[
+          results.length === 0 ? styles.emptyContainer : undefined,
+          {
+            paddingBottom:
+              keyboardHeight > 0 ? keyboardHeight : insets.bottom,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={styles.separator} />}

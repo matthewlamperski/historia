@@ -16,14 +16,21 @@ export { default as LandmarkDetailSheet } from './LandmarkDetailSheet';
 export type { LandmarkDetailSheetProps } from './LandmarkDetailSheet';
 export { JournalModal } from './JournalModal';
 export { LevelBadge } from './LevelBadge';
+export { LevelTag } from './LevelTag';
 export { ChallengeCoin } from './ChallengeCoin';
 export { ImageViewerModal } from './ImageViewerModal';
 export type { ImageViewerModalProps } from './ImageViewerModal';
+export { VideoViewerModal } from './VideoViewerModal';
 export { LocationPickerModal } from './LocationPickerModal';
 export type { PickedLocation } from './LocationPickerModal';
 export { LandmarkPickerModal } from './LandmarkPickerModal';
 export type { PickedLandmark } from './LandmarkPickerModal';
 export { LandmarkModal } from './LandmarkModal';
+export { AskBedeCard } from './AskBedeCard';
+export { LandmarkEditModal } from './LandmarkEditModal';
+export { BedeBubble } from './BedeBubble';
+export { BedeTypingIndicator } from './BedeTypingIndicator';
+export { SignupCTA } from './SignupCTA';
 
 // Add more UI components as they are created
 export type { ButtonVariant, ButtonSize } from '../../types';

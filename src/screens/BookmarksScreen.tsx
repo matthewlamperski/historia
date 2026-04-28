@@ -14,6 +14,7 @@ import { Text } from '../components/ui';
 import { theme } from '../constants/theme';
 import { openDirections } from '../utils';
 import { RootStackScreenProps, Landmark } from '../types';
+import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useLandmarks } from '../hooks/useLandmarks';
 import { useVisits } from '../hooks/useVisits';
@@ -37,6 +38,8 @@ const CATEGORY_CONFIG: Record<
 };
 
 export const BookmarksScreen = () => {
+  const navigation =
+    useNavigation<RootStackScreenProps<'Bookmarks'>['navigation']>();
   const { user, updateUser } = useAuthStore();
   const currentUserId = user?.id ?? '';
 
@@ -316,6 +319,13 @@ export const BookmarksScreen = () => {
             onVisit={handleBottomSheetVisit}
             onDirections={handleBottomSheetDirections}
             onSaveOffline={() => {}}
+            onAskBede={() =>
+              navigation.navigate('AskBede', {
+                landmarkId: selectedLandmark.id,
+                landmarkName: selectedLandmark.name,
+              })
+            }
+            onLandmarkUpdated={setSelectedLandmark}
             isOfflineSaved={false}
           />
         )}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import Video from 'react-native-video';
 import { Text } from '../ui';
+import { LevelTag } from './LevelTag';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { ReportModal } from './ReportModal';
 import { ImageViewerModal } from './ImageViewerModal';
+import { VideoViewerModal } from './VideoViewerModal';
 import { theme } from '../../constants/theme';
 import { Post as PostType, Landmark } from '../../types';
 import { formatDistanceToNow } from '../../utils/formatters';
@@ -35,6 +37,89 @@ interface PostProps {
 const { width: screenWidth } = Dimensions.get('window');
 const imageWidth = screenWidth - theme.spacing.lg * 2;
 
+const MIN_ASPECT = 0.75; // 3:4 — tallest we'll allow in the feed
+const MAX_ASPECT = 1.91; // ~16:8.4 — widest we'll allow in the feed
+const DEFAULT_ASPECT = 1; // square placeholder until we learn the real aspect
+const clampAspect = (a: number) => Math.max(MIN_ASPECT, Math.min(MAX_ASPECT, a));
+
+type MediaItem =
+  | { type: 'image'; uri: string; imageIndex: number }
+  | { type: 'video'; uri: string; videoIndex: number };
+
+interface MediaSlideProps {
+  item: MediaItem;
+  width: number;
+  /** When provided, every slide uses this aspect ratio (for multi-item
+   *  carousels where slides must be uniform). When omitted, the slide adapts
+   *  to its own content. */
+  fixedAspect?: number;
+  onPress: () => void;
+}
+
+const MediaSlide: React.FC<MediaSlideProps> = ({ item, width, fixedAspect, onPress }) => {
+  const [aspect, setAspect] = useState<number>(DEFAULT_ASPECT);
+
+  useEffect(() => {
+    if (fixedAspect != null) return; // uniform — no need to measure
+    if (item.type !== 'image') return;
+    let cancelled = false;
+    Image.getSize(
+      item.uri,
+      (w, h) => {
+        if (!cancelled && w > 0 && h > 0) setAspect(clampAspect(w / h));
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [item.type, item.uri, fixedAspect]);
+
+  const containerStyle = { width, aspectRatio: fixedAspect ?? aspect };
+
+  if (item.type === 'image') {
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={onPress}>
+        <View style={[styles.mediaSlide, containerStyle]}>
+          <Image source={{ uri: item.uri }} style={styles.mediaFill} resizeMode="cover" />
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={onPress}>
+      <View style={[styles.mediaSlide, containerStyle]}>
+        <Video
+          source={{ uri: item.uri }}
+          style={styles.mediaFill}
+          resizeMode="cover"
+          paused
+          muted
+          repeat={false}
+          onLoad={(data: any) => {
+            if (fixedAspect != null) return;
+            const size = data?.naturalSize;
+            if (size && size.width > 0 && size.height > 0) {
+              const isPortrait =
+                size.orientation === 'portrait' || size.height > size.width;
+              const ratio = isPortrait
+                ? Math.min(size.width, size.height) / Math.max(size.width, size.height)
+                : size.width / size.height;
+              setAspect(clampAspect(ratio));
+            }
+          }}
+        />
+        <View pointerEvents="none" style={styles.playOverlay}>
+          <View style={styles.playCircle}>
+            <Icon name="play" size={22} color={theme.colors.white} />
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 export const Post: React.FC<PostProps> = ({
   post,
   onComment,
@@ -44,8 +129,9 @@ export const Post: React.FC<PostProps> = ({
   currentUserId = '',
   showFullContent = false,
 }) => {
-  const [imageIndex, setImageIndex] = useState(0);
+  const [mediaPage, setMediaPage] = useState(0);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [videoViewerIndex, setVideoViewerIndex] = useState<number | null>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -136,77 +222,77 @@ export const Post: React.FC<PostProps> = ({
     ];
   };
 
-  const renderImages = () => {
-    if (post.images.length === 0) return null;
+  const mediaItems = useMemo<MediaItem[]>(() => {
+    const imgs: MediaItem[] = (post.images ?? []).map((uri, i) => ({
+      type: 'image',
+      uri,
+      imageIndex: i,
+    }));
+    const vids: MediaItem[] = (post.videos ?? []).map((uri, i) => ({
+      type: 'video',
+      uri,
+      videoIndex: i,
+    }));
+    return [...imgs, ...vids];
+  }, [post.images, post.videos]);
 
-    if (post.images.length === 1) {
+  const handleMediaPress = useCallback(
+    (item: MediaItem) => {
+      if (item.type === 'image') {
+        setLightboxIndex(item.imageIndex);
+      } else {
+        setVideoViewerIndex(item.videoIndex);
+      }
+    },
+    [],
+  );
+
+  const renderMedia = () => {
+    if (mediaItems.length === 0) return null;
+
+    if (mediaItems.length === 1) {
       return (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => setLightboxIndex(0)}>
-          <Image
-            source={{ uri: post.images[0] }}
-            style={styles.singleImage}
-            resizeMode="cover"
+        <View style={styles.mediaContainer}>
+          <MediaSlide
+            item={mediaItems[0]}
+            width={imageWidth}
+            onPress={() => handleMediaPress(mediaItems[0])}
           />
-        </TouchableOpacity>
+        </View>
       );
     }
 
     return (
-      <View style={styles.imageContainer}>
+      <View style={styles.mediaContainer}>
         <ScrollView
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          onScroll={(event) => {
-            const contentOffsetX = event.nativeEvent.contentOffset.x;
-            const index = Math.floor(contentOffsetX / imageWidth);
-            setImageIndex(index);
+          onScroll={event => {
+            const x = event.nativeEvent.contentOffset.x;
+            setMediaPage(Math.round(x / imageWidth));
           }}
           scrollEventThrottle={16}
         >
-          {post.images.map((uri, index) => (
-            <TouchableOpacity key={index} activeOpacity={0.9} onPress={() => setLightboxIndex(index)}>
-              <Image
-                source={{ uri }}
-                style={styles.multipleImage}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
+          {mediaItems.map((item, index) => (
+            <MediaSlide
+              key={`${item.type}-${index}`}
+              item={item}
+              width={imageWidth}
+              fixedAspect={1}
+              onPress={() => handleMediaPress(item)}
+            />
           ))}
         </ScrollView>
 
-        {post.images.length > 1 && (
-          <View style={styles.imageIndicator}>
-            {post.images.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.indicatorDot,
-                  index === imageIndex && styles.activeDot,
-                ]}
-              />
-            ))}
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderVideos = () => {
-    const videos = post.videos ?? [];
-    if (videos.length === 0) return null;
-    return (
-      <View>
-        {videos.map((uri, index) => (
-          <Video
-            key={index}
-            source={{ uri }}
-            style={styles.videoPlayer}
-            controls
-            resizeMode="contain"
-            paused
-          />
-        ))}
+        <View style={styles.imageIndicator}>
+          {mediaItems.map((_, index) => (
+            <View
+              key={index}
+              style={[styles.indicatorDot, index === mediaPage && styles.activeDot]}
+            />
+          ))}
+        </View>
       </View>
     );
   };
@@ -229,9 +315,16 @@ export const Post: React.FC<PostProps> = ({
             )}
           </View>
           <View style={styles.userDetails}>
-            <Text variant="label" weight="semibold">
-              {post.user.name}
-            </Text>
+            <View style={styles.userNameRow}>
+              <Text variant="label" weight="semibold" numberOfLines={1} style={styles.userName}>
+                {post.user.name}
+              </Text>
+              <LevelTag
+                points={post.user.pointsBalance}
+                isPremium={post.user.isPremium}
+                size="compact"
+              />
+            </View>
             <Text variant="caption" color="gray.500">
               {formatDistanceToNow(post.createdAt)}
             </Text>
@@ -282,11 +375,8 @@ export const Post: React.FC<PostProps> = ({
         </TouchableOpacity>
       )}
 
-      {/* Images */}
-      {renderImages()}
-
-      {/* Videos */}
-      {renderVideos()}
+      {/* Media (images + videos) */}
+      {renderMedia()}
 
       {/* Actions */}
       <View style={styles.actions}>
@@ -327,6 +417,15 @@ export const Post: React.FC<PostProps> = ({
           images={post.images}
           initialIndex={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
+        />
+      )}
+
+      {/* Video viewer */}
+      {videoViewerIndex !== null && (
+        <VideoViewerModal
+          visible={videoViewerIndex !== null}
+          uri={(post.videos ?? [])[videoViewerIndex]}
+          onClose={() => setVideoViewerIndex(null)}
         />
       )}
     </View>
@@ -370,6 +469,15 @@ const styles = StyleSheet.create({
   userDetails: {
     flex: 1,
   },
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  userName: {
+    flexShrink: 1,
+  },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -405,26 +513,32 @@ const styles = StyleSheet.create({
     marginLeft: theme.spacing.xs,
     fontWeight: theme.fontWeight.medium,
   },
-  imageContainer: {
+  mediaContainer: {
     marginBottom: theme.spacing.sm,
   },
-  videoPlayer: {
-    width: imageWidth,
-    height: 240,
-    backgroundColor: theme.colors.gray[900],
-    marginBottom: theme.spacing.sm,
-  },
-  singleImage: {
-    width: imageWidth,
-    height: 300,
+  mediaSlide: {
     marginHorizontal: theme.spacing.lg,
     borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.gray[100],
   },
-  multipleImage: {
-    width: imageWidth,
-    height: 300,
-    marginHorizontal: theme.spacing.lg,
-    borderRadius: theme.borderRadius.lg,
+  mediaFill: {
+    width: '100%',
+    height: '100%',
+  },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 4,
   },
   imageIndicator: {
     flexDirection: 'row',

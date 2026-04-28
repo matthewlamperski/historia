@@ -6,10 +6,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { ModerationProvider } from './src/context/ModerationContext';
+import { PointsConfigProvider } from './src/context/PointsConfigContext';
 import { theme } from './src/constants/theme';
 import RNSplashScreen from 'react-native-splash-screen';
+import { useNotificationHandlers } from './src/hooks';
 
 function App(): React.JSX.Element {
+  // Register FCM foreground/background/tap handlers once at the root.
+  useNotificationHandlers();
 
   useEffect(() => {
     setTimeout(() => {
@@ -21,12 +25,14 @@ function App(): React.JSX.Element {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ModerationProvider>
-          <StatusBar
-            barStyle="dark-content"
-            backgroundColor={theme.colors.white}
-          />
-          <RootNavigator />
-          <Toast />
+          <PointsConfigProvider>
+            <StatusBar
+              barStyle="dark-content"
+              backgroundColor={theme.colors.white}
+            />
+            <RootNavigator />
+            <Toast />
+          </PointsConfigProvider>
         </ModerationProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>

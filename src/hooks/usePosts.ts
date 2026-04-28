@@ -4,6 +4,8 @@ import { postsService } from '../services/postsService';
 import { pointsService } from '../services/pointsService';
 import { useToast } from './useToast';
 import { useAuthStore } from '../store/authStore';
+import { usePointsConfig } from '../context/PointsConfigContext';
+import { useSubscription } from './useSubscription';
 
 export interface UsePostsReturn {
   posts: Post[];
@@ -30,6 +32,8 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
 
   const { user, updateUser } = useAuthStore();
   const { showToast } = useToast();
+  const { config: pointsConfig, status: pointsConfigStatus } = usePointsConfig();
+  const { isPremium } = useSubscription();
 
   const loadPosts = useCallback(async () => {
     try {
@@ -95,30 +99,52 @@ export const usePosts = (initialLoad: boolean = true): UsePostsReturn => {
       return;
     }
 
-    // Hard limit: 10 posts per day
-    const todayCount = await pointsService.getTodayPostCount(user.id);
-    if (todayCount >= 10) {
-      showToast("You've reached today's limit of 10 posts", 'error');
-      return;
+    // Daily post cap from dynamic config (skip enforcement if config unavailable)
+    const dailyCap = pointsConfig?.earning.dailyPostCap;
+    if (dailyCap !== undefined) {
+      const todayCount = await pointsService.getTodayPostCount(user.id);
+      if (todayCount >= dailyCap) {
+        showToast(`You've reached today's limit of ${dailyCap} posts`, 'error');
+        return;
+      }
     }
 
     try {
       const newPost = await postsService.createPost(postData, user.id, user);
       setPosts(prev => [newPost, ...prev]);
 
-      // Reflect earned points locally: 5 pts base + 1 pt per photo/video
-      const imageCount = postData.images?.length ?? 0;
-      const videoCount = postData.videos?.length ?? 0;
-      const earned = 5 + imageCount + videoCount;
-      updateUser({ pointsBalance: (user.pointsBalance ?? 0) + earned });
+      // Reflect earned points locally based on dynamic earning rules
+      let earned = 0;
+      if (pointsConfigStatus === 'ready' && pointsConfig) {
+        const imageCount = postData.images?.length ?? 0;
+        const videoCount = postData.videos?.length ?? 0;
+        earned =
+          pointsConfig.earning.postBasePoints +
+          (imageCount + videoCount) * pointsConfig.earning.postPerMediaPoints;
+        updateUser({ pointsBalance: (user.pointsBalance ?? 0) + earned });
+      } else {
+        console.warn('[usePosts] points config unavailable; skipping local points update');
+      }
 
-      showToast('Post created successfully!', 'success');
+      // Toast variant: Pro users see clean confirmation; free users see a
+      // nudge to upgrade so they know their points are accumulating but
+      // need Pro to redeem.
+      if (earned > 0 && !isPremium) {
+        showToast(
+          `Post created — +${earned} pts. Upgrade to Pro to redeem.`,
+          'success',
+        );
+      } else if (earned > 0) {
+        showToast(`Post created — +${earned} pts`, 'success');
+      } else {
+        showToast('Post created successfully!', 'success');
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create post';
       showToast(errorMessage, 'error');
       throw err;
     }
-  }, [user, showToast, updateUser]);
+  }, [user, showToast, updateUser, pointsConfig, pointsConfigStatus, isPremium]);
 
   const loadCompanionPosts = useCallback(async (companionIds: string[]) => {
     try {

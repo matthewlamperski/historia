@@ -24,6 +24,7 @@ export interface UseImagePickerReturn {
 }
 
 const MAX_MEDIA = 10;
+const MAX_VIDEOS = 3;
 
 export const useImagePicker = (): UseImagePickerReturn => {
   const [selectedMedia, setSelectedMedia] = useState<SelectedMedia[]>([]);
@@ -99,7 +100,24 @@ export const useImagePicker = (): UseImagePickerReturn => {
 
         setSelectedMedia(current => {
           const slots = MAX_MEDIA - current.length;
-          return [...current, ...newMedia.slice(0, slots)];
+          const videoCount = current.filter(m => m.type === 'video').length;
+          let videoSlots = MAX_VIDEOS - videoCount;
+          const accepted: SelectedMedia[] = [];
+          let videoRejected = false;
+          for (const m of newMedia.slice(0, slots)) {
+            if (m.type === 'video') {
+              if (videoSlots <= 0) {
+                videoRejected = true;
+                continue;
+              }
+              videoSlots -= 1;
+            }
+            accepted.push(m);
+          }
+          if (videoRejected) {
+            showToast(`Up to ${MAX_VIDEOS} videos per post`, 'error');
+          }
+          return [...current, ...accepted];
         });
       }
     });

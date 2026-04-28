@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button, Post, CreatePostModal } from '../components/ui';
+import { Text, Button, Post, CreatePostModal, SignupCTA } from '../components/ui';
 import { LandmarkModal } from '../components/ui/LandmarkModal';
 import { theme } from '../constants/theme';
 import { usePosts, useCompanions, useModeration } from '../hooks';
@@ -220,6 +220,18 @@ const FeedTab = () => {
       </Button>
     </View>
   );
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <SignupCTA
+          icon="newspaper"
+          title="Join the conversation"
+          subtitle="See posts from explorers near you, share your own discoveries, and follow fellow history buffs."
+        />
+      </SafeAreaView>
+    );
+  }
 
   if (error && posts.length === 0) {
     return (

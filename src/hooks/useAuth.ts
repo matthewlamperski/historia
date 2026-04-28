@@ -5,9 +5,12 @@ import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from '../services/firebaseConfig';
 import { User } from '../types';
-import { useBranchListener } from './useReferral';
+import { useReferralLinkListener } from './useReferralLinkListener';
 import { referralService } from '../services/referralService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFCMToken, clearFCMToken } from './useFCMToken';
+import { getStoredAnonymousHometown } from './useAnonymousHometown';
+import { userService } from '../services/userService';
 
 export interface UseAuthReturn {
   // State
@@ -62,8 +65,12 @@ export const useAuth = (): UseAuthReturn => {
   // Track which UIDs are brand-new (just created) so we can apply referral bonus
   const newlyCreatedUidRef = useRef<string | null>(null);
 
-  // Start Branch deep-link listener (captures referral codes from links)
-  useBranchListener();
+  // Capture referral codes from universal-link taps (replaces Branch).
+  useReferralLinkListener();
+
+  // Register this device's FCM token on the user doc whenever we have one.
+  // Runs on login and on token refresh; cleared explicitly on sign-out below.
+  useFCMToken(authUser?.id ?? null);
 
   // Handle auth state changes
   const handleAuthStateChanged = useCallback(
@@ -84,12 +91,47 @@ export const useAuth = (): UseAuthReturn => {
         const userProfile = await fetchUserProfile(firebaseUser.uid);
 
         if (userProfile) {
-          // Sync name/avatar from Firebase Auth (important for Google/Apple users)
+          // Sync name/avatar from Firebase Auth (important for Google/Apple users).
+          // CRITICAL: only sync `photoURL` if it's a remote https URL. A local
+          // file URI in Firebase Auth photoURL was the root cause of the
+          // "avatar resets to a broken local path on every save" bug —
+          // a corrupted Auth value would propagate to Firestore here on every
+          // launch. We now also actively scrub a corrupted Firestore avatar
+          // when we detect it.
           const authName = firebaseUser.displayName;
           const authPhoto = firebaseUser.photoURL;
+          const isRemotePhoto =
+            typeof authPhoto === 'string' &&
+            (authPhoto.startsWith('https://') || authPhoto.startsWith('http://'));
+          const isRemoteFirestoreAvatar =
+            typeof userProfile.avatar === 'string' &&
+            (userProfile.avatar.startsWith('https://') ||
+              userProfile.avatar.startsWith('http://'));
+
           const updates: Partial<User> = {};
-          if (authName && authName !== userProfile.name) { updates.name = authName; }
-          if (authPhoto && authPhoto !== userProfile.avatar) { updates.avatar = authPhoto; }
+          if (authName && authName !== userProfile.name) {
+            updates.name = authName;
+          }
+          // Only apply Auth's photoURL if it's a real URL.
+          if (isRemotePhoto && authPhoto !== userProfile.avatar) {
+            updates.avatar = authPhoto;
+          }
+          // Self-heal a previously-corrupted avatar field — clear it so the
+          // app falls back to the default avatar instead of a broken
+          // file:// reference. User can re-upload a fresh one.
+          if (
+            !isRemoteFirestoreAvatar &&
+            typeof userProfile.avatar === 'string' &&
+            userProfile.avatar.length > 0
+          ) {
+            updates.avatar = '';
+            // Also clear it from Firebase Auth so it doesn't re-corrupt.
+            firebaseUser
+              .updateProfile({ photoURL: '' })
+              .catch(err =>
+                console.warn('[useAuth] failed to clear Auth photoURL:', err),
+              );
+          }
 
           if (Object.keys(updates).length > 0) {
             firestore()
@@ -144,6 +186,25 @@ export const useAuth = (): UseAuthReturn => {
           .set({ lastSeenAt: firestore.FieldValue.serverTimestamp() }, { merge: true })
           .catch(console.error);
 
+        // Migrate anonymous hometown → Firestore for any user who doesn't
+        // yet have one. Anonymous-first onboarding writes a hometown to
+        // AsyncStorage before signup; this step copies it onto the user
+        // profile so the gate stays cleared. We deliberately keep the
+        // AsyncStorage copy around so signing out doesn't re-trigger the
+        // hometown picker.
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser && !currentUser.hometown) {
+          const anonHometown = await getStoredAnonymousHometown();
+          if (anonHometown) {
+            try {
+              await userService.updateHometown(firebaseUser.uid, anonHometown);
+              useAuthStore.getState().updateUser({ hometown: anonHometown });
+            } catch (err) {
+              console.warn('[anon-migration] hometown write failed:', err);
+            }
+          }
+        }
+
         // Initialize subscription store for this user
         initSubscription(firebaseUser.uid);
 
@@ -165,7 +226,11 @@ export const useAuth = (): UseAuthReturn => {
           }
         }
       } else {
-        // User is signed out — tear down IAP listeners
+        // User is signed out — tear down IAP listeners and drop push token
+        const previousUid = useAuthStore.getState().authUser?.id;
+        if (previousUid) {
+          clearFCMToken(previousUid).catch(() => {});
+        }
         teardownSubscription();
         setUser(null);
         setAuthUser(null);

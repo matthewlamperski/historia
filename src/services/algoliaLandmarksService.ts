@@ -95,9 +95,20 @@ export const searchLandmarks = async (
 /**
  * Browse all landmarks in the index, bypassing the 1000-hit search limit.
  * Uses Algolia's browseObjects helper which paginates through every record.
- * Call once at map startup; feed the result to the MapLibre ShapeSource.
+ *
+ * Attributes are intentionally minimal — just enough to place a dot on the
+ * map and show a quick-preview sheet. Long-form content (description,
+ * historicalSignificance, editorialSummary, openingHours, visitingHours) is
+ * fetched on demand via `landmarksService.getLandmark(id)` when the user taps
+ * a marker. This keeps the initial payload small and markers appear fast.
+ *
+ * @param onPage optional callback fired after each page lands so the caller
+ *               can render markers incrementally instead of waiting for the
+ *               entire browse to finish.
  */
-export const browseAllLandmarks = async (): Promise<LandmarkHit[]> => {
+export const browseAllLandmarks = async (
+  onPage?: (pageHits: LandmarkHit[]) => void,
+): Promise<LandmarkHit[]> => {
   const allHits: LandmarkHit[] = [];
 
   await (client as any).browseObjects({
@@ -108,8 +119,6 @@ export const browseAllLandmarks = async (): Promise<LandmarkHit[]> => {
       attributesToRetrieve: [
         'name',
         'shortDescription',
-        'description',
-        'historicalSignificance',
         'address',
         'city',
         'state',
@@ -117,24 +126,23 @@ export const browseAllLandmarks = async (): Promise<LandmarkHit[]> => {
         'landmarkType',
         'yearBuilt',
         'images',
-        'visitingHours',
-        'website',
         'coordinates',
         '_geoloc',
-        // Places enrichment fields
+        // Small Places enrichment fields — keep these so the quick-preview
+        // has rating/phone/website right away. The big ones are omitted.
         'populated',
         'phone',
+        'website',
         'googleMapsUri',
         'rating',
         'ratingCount',
-        'openingHours',
         'wheelchair',
-        'editorialSummary',
       ],
     },
     aggregator: (response: any) => {
-      allHits.push(...(response.hits as LandmarkHit[]));
-      console.log(`[Algolia] Loaded ${allHits.length} landmarks so far…`);
+      const pageHits = response.hits as LandmarkHit[];
+      allHits.push(...pageHits);
+      onPage?.(pageHits);
     },
   });
 

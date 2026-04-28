@@ -20,14 +20,14 @@ import { useMessages, useMessageInput, useModeration, useToast } from '../hooks'
 import { RootStackScreenProps, CreateMessageData, Conversation } from '../types';
 import { FontAwesome6 } from '@react-native-vector-icons/fontawesome6';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { messagingService } from '../services';
+import { messagingService, landmarksService } from '../services';
 import { useAuthStore } from '../store/authStore';
 
 export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
   route,
   navigation,
 }) => {
-  const { conversationId, otherUserName, otherUserAvatar, otherUserUsername, otherUserId } = route.params;
+  const { conversationId, otherUserName, otherUserAvatar, otherUserUsername, otherUserId, pendingLandmarkId } = route.params;
   const { user } = useAuthStore();
   const currentUserId = user?.id ?? '';
   const headerHeight = useHeaderHeight();
@@ -65,9 +65,42 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
     removeMedia,
     sharedPost,
     setSharedPost,
+    pendingLandmark,
+    setPendingLandmark,
     clearAll,
     canSend,
   } = useMessageInput();
+
+  // Consume `pendingLandmarkId` from nav once: load the landmark, stash it as
+  // a pending attachment, then clear the param so we don't re-apply on
+  // re-focus / param change.
+  const consumedPendingLandmarkRef = useRef(false);
+  useEffect(() => {
+    if (!pendingLandmarkId || consumedPendingLandmarkRef.current) return;
+    consumedPendingLandmarkRef.current = true;
+
+    landmarksService
+      .getLandmark(pendingLandmarkId)
+      .then(landmark => {
+        if (!landmark) {
+          showToast('Landmark could not be loaded.', 'error');
+          return;
+        }
+        setPendingLandmark({
+          landmarkId: landmark.id,
+          name: landmark.name,
+          category: landmark.category,
+          image: landmark.images?.[0],
+          address: landmark.address,
+        });
+      })
+      .catch(err => {
+        console.error('Failed to load landmark:', err);
+        showToast('Landmark could not be loaded.', 'error');
+      });
+
+    navigation.setParams({ pendingLandmarkId: undefined });
+  }, [pendingLandmarkId, navigation, setPendingLandmark]);
 
   const { blockUser } = useModeration();
   const { showToast } = useToast();
@@ -224,6 +257,7 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
             userName: sharedPost.user.name,
           }
         : undefined,
+      landmarkReference: pendingLandmark ?? undefined,
     };
 
     const imageUris = selectedMedia.filter(m => m.type === 'image').map(m => m.uri);
@@ -246,6 +280,7 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
     conversationId,
     text,
     sharedPost,
+    pendingLandmark,
     selectedMedia,
     sendMessage,
     sendMessageWithMedia,
@@ -271,6 +306,13 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
     []
   );
 
+  const handleLandmarkPress = useCallback(
+    (landmarkId: string) => {
+      navigation.navigate('LandmarkDetail', { landmarkId });
+    },
+    [navigation],
+  );
+
   const handleLoadMore = useCallback(() => {
     if (hasMore && !loading) {
       loadMoreMessages();
@@ -291,11 +333,12 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
           onImagePress={handleImagePress}
           onVideoPress={handleVideoPress}
           onPostPress={handlePostPress}
+          onLandmarkPress={handleLandmarkPress}
           showSenderName={isGroup}
         />
       );
     },
-    [messages, toggleLike, handleImagePress, handleVideoPress, handlePostPress]
+    [messages, toggleLike, handleImagePress, handleVideoPress, handlePostPress, handleLandmarkPress]
   );
 
   const renderHeader = () => {
@@ -372,6 +415,8 @@ export const ChatScreen: React.FC<RootStackScreenProps<'ChatScreen'>> = ({
         onRemoveMedia={removeMedia}
         sharedPost={sharedPost}
         onClearSharedPost={() => setSharedPost(null)}
+        pendingLandmark={pendingLandmark}
+        onClearPendingLandmark={() => setPendingLandmark(null)}
         onSend={handleSend}
         canSend={canSend}
         placeholder={isGroup ? `Message ${conversation?.name ?? 'group'}...` : `Message ${otherUser?.name || 'user'}...`}

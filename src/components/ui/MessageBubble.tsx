@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import Video from 'react-native-video';
 import { Text } from './Text';
+import { LevelTag } from './LevelTag';
 import { ActionSheet } from './ActionSheet';
 import { ReportModal } from './ReportModal';
 import { ActionSheetOption } from './ActionSheet';
@@ -24,8 +25,25 @@ interface MessageBubbleProps {
   onImagePress?: (images: string[], index: number) => void;
   onVideoPress?: (videos: string[], index: number) => void;
   onPostPress?: (postId: string) => void;
+  onLandmarkPress?: (landmarkId: string) => void;
   showSenderName?: boolean;
 }
+
+const LANDMARK_CATEGORY_ICON: Record<string, string> = {
+  monument: 'monument',
+  building: 'building-columns',
+  site: 'map-pin',
+  battlefield: 'flag',
+  other: 'landmark',
+};
+
+const LANDMARK_CATEGORY_COLOR: Record<string, string> = {
+  monument: theme.colors.primary[500],
+  building: theme.colors.warning[500],
+  site: theme.colors.success[500],
+  battlefield: theme.colors.error[500],
+  other: theme.colors.secondary[500],
+};
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
@@ -35,6 +53,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onImagePress,
   onVideoPress,
   onPostPress,
+  onLandmarkPress,
   showSenderName = false,
 }) => {
   const [showActionSheet, setShowActionSheet] = useState(false);
@@ -97,12 +116,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <View style={styles.messageContent}>
         {/* Sender name for group chats */}
         {showSenderName && !isSender && !isConsecutive && (
-          <Text variant="caption" weight="semibold" style={styles.senderName}>
-            {message.sender.name}
-          </Text>
+          <View style={styles.senderRow}>
+            <Text variant="caption" weight="semibold" style={styles.senderName}>
+              {message.sender.name}
+            </Text>
+            <LevelTag
+              points={message.sender.pointsBalance}
+              isPremium={message.sender.isPremium}
+              size="compact"
+            />
+          </View>
         )}
 
-        {/* Message bubble */}
+        {/* Message bubble — only rendered when there's actual bubble content
+            (text / images / videos / post reference). A lone landmark renders
+            below with no bubble. */}
+        {(message.text ||
+          message.images.length > 0 ||
+          (message.videos ?? []).length > 0 ||
+          message.postReference) && (
         <View
           style={[
             styles.bubble,
@@ -220,6 +252,67 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </TouchableOpacity>
           )}
         </View>
+        )}
+
+        {/* Landmark reference — rendered as a standalone card outside the
+            bubble so it never sits inside a chat bubble. */}
+        {message.landmarkReference && (
+          <TouchableOpacity
+            style={styles.landmarkStandalone}
+            onPress={() =>
+              onLandmarkPress?.(message.landmarkReference!.landmarkId)
+            }
+            activeOpacity={0.85}
+          >
+            {message.landmarkReference.image ? (
+              <Image
+                source={{ uri: message.landmarkReference.image }}
+                style={styles.landmarkHero}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.landmarkHero,
+                  styles.landmarkHeroFallback,
+                  {
+                    backgroundColor:
+                      LANDMARK_CATEGORY_COLOR[
+                        message.landmarkReference.category
+                      ] ?? theme.colors.primary[500],
+                  },
+                ]}
+              >
+                <FontAwesome6
+                  name={
+                    (LANDMARK_CATEGORY_ICON[
+                      message.landmarkReference.category
+                    ] ?? 'landmark') as any
+                  }
+                  size={40}
+                  color={theme.colors.white}
+                  iconStyle="solid"
+                />
+              </View>
+            )}
+            <View style={styles.landmarkTitleRow}>
+              <FontAwesome6
+                name="location-dot"
+                size={12}
+                color={theme.colors.primary[600]}
+                iconStyle="solid"
+              />
+              <Text
+                variant="body"
+                weight="semibold"
+                color="gray.900"
+                numberOfLines={2}
+                style={styles.landmarkTitle}
+              >
+                {message.landmarkReference.name}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Message footer (timestamp + like) */}
         <View
@@ -320,10 +413,15 @@ const styles = StyleSheet.create({
   messageContent: {
     maxWidth: '75%',
   },
-  senderName: {
-    color: theme.colors.primary[600],
+  senderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 2,
     marginLeft: theme.spacing.xs,
+  },
+  senderName: {
+    color: theme.colors.primary[600],
   },
   bubble: {
     borderRadius: theme.borderRadius.xl,
@@ -410,6 +508,35 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: theme.borderRadius.md,
     marginTop: theme.spacing.xs,
+  },
+  landmarkCard: {
+    marginTop: theme.spacing.xs,
+    width: 240,
+    gap: 6,
+  },
+  landmarkStandalone: {
+    marginTop: theme.spacing.xs,
+    width: 240,
+    gap: 6,
+  },
+  landmarkHero: {
+    width: '100%',
+    height: 140,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.gray[200],
+  },
+  landmarkHeroFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  landmarkTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  landmarkTitle: {
+    flex: 1,
   },
   footer: {
     flexDirection: 'row',

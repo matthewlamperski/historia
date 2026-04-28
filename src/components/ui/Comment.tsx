@@ -7,6 +7,7 @@ import {
   Alert,
 } from 'react-native';
 import { Text } from '../ui';
+import { LevelTag } from './LevelTag';
 import { ActionSheet, ActionSheetOption } from './ActionSheet';
 import { ReportModal } from './ReportModal';
 import { theme } from '../../constants/theme';
@@ -111,9 +112,16 @@ export const Comment: React.FC<CommentProps> = ({
 
         <View style={styles.content}>
           <View style={styles.bubble}>
-            <Text variant="label" weight="semibold" style={styles.userName}>
-              {comment.user.name}
-            </Text>
+            <View style={styles.userNameRow}>
+              <Text variant="label" weight="semibold" style={styles.userName}>
+                {comment.user.name}
+              </Text>
+              <LevelTag
+                points={comment.user.pointsBalance}
+                isPremium={comment.user.isPremium}
+                size="compact"
+              />
+            </View>
             <Text variant="body" style={styles.commentText}>
               {comment.content}
             </Text>
@@ -180,8 +188,15 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.lg,
     marginBottom: theme.spacing.xs,
   },
-  userName: {
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 2,
+    flexWrap: 'wrap',
+  },
+  userName: {
+    flexShrink: 1,
   },
   commentText: {
     lineHeight: 20,

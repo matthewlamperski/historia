@@ -1,38 +1,52 @@
 import { useEffect, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import firestore from '@react-native-firebase/firestore';
 import { COLLECTIONS } from '../services/firebaseConfig';
 
+async function requestPushPermission(): Promise<boolean> {
+  if (Platform.OS === 'ios') {
+    const authStatus = await messaging().requestPermission();
+    return (
+      authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL
+    );
+  }
+
+  // Android 13+ requires explicit runtime permission for notifications.
+  // Older Android versions grant it implicitly — the API returns GRANTED.
+  if (Platform.OS === 'android' && Platform.Version >= 33) {
+    const result = await PermissionsAndroid.request(
+      // String literal keeps this compatible with older RN type defs.
+      'android.permission.POST_NOTIFICATIONS' as any,
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  }
+
+  return true;
+}
+
 /**
- * Requests FCM notification permission, obtains the device token,
- * stores it in Firestore under users/{userId}.fcmToken, and sets up
- * a foreground message listener that logs incoming pushes (you can
- * extend this to drive local UI updates).
+ * Requests FCM notification permission, obtains the device token, and stores
+ * it in Firestore under users/{userId}.fcmToken. Keeps the stored token in
+ * sync with token refreshes. Foreground/tap handling lives in
+ * useNotificationHandlers so it has access to the navigation tree.
  */
 export const useFCMToken = (userId: string | null | undefined) => {
   const registerToken = useCallback(async (uid: string) => {
     try {
-      // iOS: request permission
-      if (Platform.OS === 'ios') {
-        const authStatus = await messaging().requestPermission();
-        const isGranted =
-          authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-          authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-        if (!isGranted) return;
-      }
+      const granted = await requestPushPermission();
+      if (!granted) return;
 
-      // Get the FCM token
       const token = await messaging().getToken();
       if (!token) return;
 
-      // Store it in the user's Firestore document
       await firestore()
         .collection(COLLECTIONS.USERS)
         .doc(uid)
         .update({ fcmToken: token });
     } catch (error) {
-      // Non-fatal — push notifications are a nice-to-have
+      // Non-fatal — push notifications are a nice-to-have.
       console.warn('FCM token registration failed:', error);
     }
   }, []);
@@ -42,7 +56,6 @@ export const useFCMToken = (userId: string | null | undefined) => {
 
     registerToken(userId);
 
-    // Handle token refresh
     const unsubscribeRefresh = messaging().onTokenRefresh(async newToken => {
       try {
         await firestore()
@@ -54,16 +67,25 @@ export const useFCMToken = (userId: string | null | undefined) => {
       }
     });
 
-    // Handle foreground messages (when app is open)
-    const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
-      // The in-app notification center already updates via Firestore listener.
-      // This handler is kept for extensibility (e.g. playing a sound).
-      console.log('FCM foreground message:', remoteMessage.notification?.title);
-    });
-
     return () => {
       unsubscribeRefresh();
-      unsubscribeForeground();
     };
   }, [userId, registerToken]);
 };
+
+/** Clears the stored FCM token and deletes the device token. Call on sign-out. */
+export async function clearFCMToken(userId: string): Promise<void> {
+  try {
+    await firestore()
+      .collection(COLLECTIONS.USERS)
+      .doc(userId)
+      .update({ fcmToken: firestore.FieldValue.delete() });
+  } catch (err) {
+    console.warn('Failed to clear fcmToken in Firestore:', err);
+  }
+  try {
+    await messaging().deleteToken();
+  } catch (err) {
+    console.warn('messaging().deleteToken() failed:', err);
+  }
+}

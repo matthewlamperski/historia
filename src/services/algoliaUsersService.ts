@@ -9,6 +9,8 @@ export interface NearbyUserHit {
   name: string;
   avatar?: string | null;
   pointsBalance?: number;
+  /** Required for the LevelTag to render — sync this field from Firestore via the Algolia extension. */
+  isPremium?: boolean;
   _geoloc?: { lat: number; lng: number };
   _rankingInfo?: {
     geoDistance: number; // meters from search center

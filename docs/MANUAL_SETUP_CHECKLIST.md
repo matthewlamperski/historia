@@ -4,6 +4,67 @@ Tasks that require your credentials, native tooling, or Firebase console access 
 
 ---
 
+## 🚀 Pre-Ship Sanity Checklist
+
+Do these before building the next TestFlight / Play Internal build. Everything else in this doc is context for how each item works.
+
+### Native & build prerequisites
+- [ ] **`cd ios && bundle exec pod install && cd ..`** — required after any native package change. Drops the Branch pod from Podfile.lock and regenerates it without RNBranch.
+- [ ] **`npm install --legacy-peer-deps`** — already run; keep lockfiles committed so CI matches.
+- [ ] **Xcode capabilities** — open `ios/historia.xcworkspace`, select `historia` target → **Signing & Capabilities**, confirm **Associated Domains** is listed (the `applinks:historia.app` entry lives in `historia.entitlements` and needs the capability to be enabled on the target).
+- [ ] **Flip `aps-environment`** in `ios/historia/historia.entitlements` from `development` to `production` before archiving for TestFlight / App Store.
+
+### Cloud Functions
+- [ ] Deploy the latest functions:
+      ```bash
+      cd functions && firebase deploy --only functions:onMessageCreate,functions:sendSubscriptionWelcome,functions:askBede
+      ```
+
+### Ask Bede (Gemini AI)
+- [ ] **Smoke test on device:** open any landmark → tap the "Ask Bede" card → send "When was this built?". First response should arrive in 2–4 seconds.
+- [ ] **Cost guardrails in place (configured in code):**
+      - Model: `gemini-2.5-flash` (cheapest modern model — ~$0.075/1M input, $0.30/1M output tokens)
+      - Free tier: 5 messages/day/user · Pro tier: 200/day/user
+      - Max output: 800 tokens (~600 words)
+      - Last 8 prior turns included as context so follow-ups stay coherent
+- [ ] **(Optional) Firestore rules** — since `users/{uid}/bedeChats` and `users/{uid}/bedeUsage` are written by the Cloud Function with admin privileges, existing user-level rules that let a user read their own subcollections are sufficient. Nothing needed unless your rules are overly restrictive.
+
+### Hosted files on `historia.app` (required for Universal Links / App Links)
+- [ ] **AASA file** — `https://historia.app/.well-known/apple-app-site-association`
+      - Plain JSON, `Content-Type: application/json`, no `.json` extension, no redirects.
+      - `appID` must be `<APPLE_TEAM_ID>.com.historia.app`.
+      - Paths: `["/landmark/*", "/referral/*"]`.
+      - Template & validator: "Universal Links & App Links" section below.
+- [ ] **assetlinks.json** — `https://historia.app/.well-known/assetlinks.json`
+      - `package_name`: `com.historia`.
+      - `sha256_cert_fingerprints`: debug + Play upload key + Play App Signing key.
+      - Template & `keytool` commands: "Universal Links & App Links" section below.
+
+### Web landing pages on `historia.app`
+- [ ] `/landmark/:id` — renders a landmark summary + App Store / Play Store badges. Users with the app installed never see this page (the universal link intercepts); it's only for users without the app.
+- [ ] `/referral/:code` — renders the code + store badges. Needed because there's no deferred deep linking (users must manually enter the code after install — this is the known trade-off for dropping Branch).
+
+### Shopify Pro welcome email
+- [ ] Set `REDDIT_COMMUNITY_URL` on the `sendSubscriptionWelcome` function env (defaults to `https://www.reddit.com/r/HistoriaPro`).
+- [ ] Confirm the Shopify Admin token has `write_customers` and `read_customers` scopes, not just `write_discounts`.
+
+### Push notifications
+- [ ] APNs `.p8` uploaded to Firebase Console → Project Settings → Cloud Messaging → iOS app.
+- [ ] On-device smoke test: send a DM to a killed app on another device, confirm the push arrives and the tap deep-links into the correct chat.
+
+### Post-deploy verification
+- [ ] **iOS universal link:** paste `https://historia.app/landmark/<real-id>` into Apple Notes → tap → app opens to that landmark (not Safari). If Safari opens, the AASA is wrong — check MIME type and no redirects.
+- [ ] **Android app link:**
+      ```bash
+      adb shell pm verify-app-links --re-verify com.historia
+      adb shell pm get-app-links com.historia       # all hosts should show "verified"
+      ```
+
+### Known gap (accepted, documented)
+- [ ] **Deferred deep linking is not supported.** A user tapping a `/referral/:code` link *before* installing won't have the code auto-applied after install. The "Got a referral code?" manual input on SignUpScreen is the fallback. This is the one thing paid services (Branch, Adjust, etc.) do that we aren't paying for.
+
+---
+
 ## After Every Native Package Install
 ```bash
 cd ios && bundle exec pod install && cd ..
@@ -12,231 +73,118 @@ Run this any time a new package with native modules is added (e.g. after `npm in
 
 ---
 
-## Referral Bonus System (Branch.io)
+## Universal Links & App Links (deep linking — replaces Branch)
 
-### 17. Create a Branch.io Account
-- Go to https://branch.io → sign up (free tier, up to 10,000 MAU)
-- Create a new app in the Branch dashboard
+Free, native deep linking for `https://historia.app/landmark/{id}` and `https://historia.app/referral/{code}`. No third-party SDK. These links open the app directly on iOS and Android when installed, fall back to the web page otherwise.
 
-### 18. Configure iOS in Branch Dashboard
-- App settings → iOS → enter Bundle ID: `com.historia.app` (check your Xcode target)
-- URI Scheme: `historia`
-- Enable **Universal Links**
-- Paste your Apple App Site Association (AASA) domain: `historia.app`
+### iOS — 1. Enable Associated Domains in Xcode
+- Open `ios/historia.xcworkspace`
+- Select the `historia` target → **Signing & Capabilities** → `+ Capability` → **Associated Domains**
+- (The entitlement is already in `ios/historia/historia.entitlements`: `applinks:historia.app`)
 
-### 19. Configure Android in Branch Dashboard
-- App settings → Android → enter Package Name from `android/app/build.gradle`
-- SHA256 fingerprint for Android App Links
-
-### 20. Get Your Branch Live Key
-- Branch Dashboard → Account Settings → App → Branch Key (Live)
-- It looks like `key_live_...`
-
-### 21. Add Branch Keys to iOS — `ios/historia/Info.plist`
-```xml
-<key>branch_key</key>
-<dict>
-  <key>live</key>
-  <string>key_live_REPLACE_WITH_YOUR_KEY</string>
-</dict>
-<key>branch_universal_link_domains</key>
-<array>
-  <string>YOURAPP.app.link</string>
-  <string>YOURAPP-alternate.app.link</string>
-</array>
-```
-Also add your URI scheme (if not already present):
-```xml
-<key>CFBundleURLTypes</key>
-<array>
-  <dict>
-    <key>CFBundleURLSchemes</key>
-    <array>
-      <string>historia</string>
-    </array>
-  </dict>
-</array>
-```
-
-### 22. Add Branch Keys to Android — `android/app/src/main/AndroidManifest.xml`
-Inside `<application>`:
-```xml
-<meta-data android:name="io.branch.sdk.BranchKey" android:value="key_live_REPLACE_WITH_YOUR_KEY" />
-<meta-data android:name="io.branch.sdk.BranchKey.test" android:value="key_test_REPLACE_WITH_YOUR_TEST_KEY" />
-```
-Inside the main `<activity>`:
-```xml
-<intent-filter android:autoVerify="true">
-  <action android:name="android.intent.action.VIEW" />
-  <category android:name="android.intent.category.DEFAULT" />
-  <category android:name="android.intent.category.BROWSABLE" />
-  <data android:scheme="https" android:host="YOURAPP.app.link" />
-  <data android:scheme="https" android:host="YOURAPP-alternate.app.link" />
-</intent-filter>
-<intent-filter>
-  <action android:name="android.intent.action.VIEW" />
-  <category android:name="android.intent.category.DEFAULT" />
-  <category android:name="android.intent.category.BROWSABLE" />
-  <data android:scheme="historia" />
-</intent-filter>
-```
-
-### 23. Xcode — Add Associated Domains Capability
-- Xcode → `historia` target → Signing & Capabilities → `+` → Associated Domains
-- Add: `applinks:YOURAPP.app.link` and `applinks:YOURAPP-alternate.app.link`
-
-### 24. Run pod install
-```bash
-cd ios && bundle exec pod install && cd ..
-```
-
-### 25. Add Branch to AppDelegate (iOS)
-
-In `ios/historia/AppDelegate.mm`, add:
-```objc
-#import <RNBranch/RNBranch.h>
-
-// In application:didFinishLaunchingWithOptions: (before [super application:...]):
-[RNBranch initSessionWithLaunchOptions:launchOptions isReferrable:YES];
-
-// Add this method:
-- (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
-  if ([RNBranch application:application openURL:url options:options]) {
-    return YES;
+### iOS — 2. Host the AASA file at `https://historia.app/.well-known/apple-app-site-association`
+Plain JSON (no `.json` extension), served with `Content-Type: application/json`, no redirects.
+```json
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.com.historia.app",
+        "paths": ["/landmark/*", "/referral/*"]
+      }
+    ]
   }
-  // Handle other URL schemes...
-  return NO;
-}
-
-- (BOOL)application:(UIApplication *)application continueUserActivity:(NSUserActivity *)userActivity restorationHandler:(void (^)(NSArray<id<UIUserActivityRestoring>> * _Nullable))restorationHandler {
-  return [RNBranch continueUserActivity:userActivity];
 }
 ```
+Replace `TEAMID` with your 10-character Apple Developer Team ID (Apple Developer → Membership).
 
-### 26. Android — Initialize Branch in MainApplication
-In `android/app/src/main/java/.../MainApplication.java` (or `.kt`):
-```java
-import io.branch.rnbranch.RNBranchModule;
+**Validate** at https://branch.io/resources/aasa-validator/ (their validator is free to use even though we aren't using their product). iOS caches the AASA aggressively — if it doesn't pick up, delete + reinstall the app.
 
-@Override
-public void onCreate() {
-  super.onCreate();
-  RNBranchModule.getAutoInstance(this);
-  // ...
-}
+### Android — 3. Host assetlinks.json at `https://historia.app/.well-known/assetlinks.json`
+Served with `Content-Type: application/json`. **Must** include the SHA-256 fingerprint of every keystore you sign with — debug, Play App Signing upload key, and (if used) the Play-generated signing key itself.
+```json
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.historia",
+      "sha256_cert_fingerprints": [
+        "<DEBUG_SHA256>",
+        "<UPLOAD_KEY_SHA256>",
+        "<PLAY_SIGNING_SHA256>"
+      ]
+    }
+  }
+]
+```
+Get the fingerprints with:
+```bash
+# Debug keystore:
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA256
+# Play upload keystore (path varies):
+keytool -list -v -keystore /path/to/upload-keystore.jks | grep SHA256
+# Play App Signing key: grab from Google Play Console → Release → Setup → App integrity
+```
+Generate/validate at https://developers.google.com/digital-asset-links/tools/generator.
+
+After deploying the file, force re-verification on device:
+```bash
+adb shell pm verify-app-links --re-verify com.historia
+adb shell pm get-app-links com.historia   # all hosts should show "verified"
 ```
 
----
+### Web fallback pages (your historia.app website)
+Because the same HTTPS URLs are used for both deep linking and for users who don't have the app installed, you need simple landing pages at `/landmark/:id` and `/referral/:code`. Minimum behavior:
+- **`/landmark/:id`** — show the landmark name/summary + "Open in Historia" button + App Store / Play Store badges.
+- **`/referral/:code`** — show the code + "Get the App" button + App Store / Play Store badges. (There is **no** auto-apply of the code — see "Known limitation" below.)
 
-## React Website — Referral Landing Page
-
-Add a page at `/referral/:code` to your React website. Here is the **complete component**:
-
+Minimal React template (no Branch required):
 ```tsx
-// src/pages/ReferralPage.tsx (or equivalent route in your framework)
-import { useEffect } from 'react';
-import { useParams } from 'react-router-dom'; // adjust for your router
+// src/pages/ReferralPage.tsx
+import { useParams } from 'react-router-dom';
 
-const IOS_APP_STORE_URL = 'https://apps.apple.com/app/historia/idYOUR_APP_ID';
-const ANDROID_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.historia.app';
-const BRANCH_KEY = 'key_live_REPLACE_WITH_YOUR_KEY';
-
-function getDeviceType(): 'ios' | 'android' | 'desktop' {
-  const ua = navigator.userAgent;
-  if (/iPad|iPhone|iPod/.test(ua)) return 'ios';
-  if (/Android/.test(ua)) return 'android';
-  return 'desktop';
-}
+const IOS_URL = 'https://apps.apple.com/app/historia/idYOUR_APP_ID';
+const ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.historia';
 
 export default function ReferralPage() {
   const { code } = useParams<{ code: string }>();
-  const device = getDeviceType();
-
-  useEffect(() => {
-    // Load Branch Web SDK and create a journey link that passes the referral code
-    // This ensures Branch can attribute the install even on web
-    const script = document.createElement('script');
-    script.src = 'https://cdn.branch.io/branch-latest.min.js';
-    script.async = true;
-    script.onload = () => {
-      (window as any).branch.init(BRANCH_KEY, (err: any) => {
-        if (err) console.error('Branch init error', err);
-      });
-    };
-    document.head.appendChild(script);
-    return () => { document.head.removeChild(script); };
-  }, []);
-
-  const handleDownload = () => {
-    // Build a Branch web-to-app link that carries the referral code
-    const branchLink =
-      `https://YOURAPP.app.link/referral?referral_code=${code}` +
-      `&$ios_url=${encodeURIComponent(IOS_APP_STORE_URL)}` +
-      `&$android_url=${encodeURIComponent(ANDROID_PLAY_URL)}` +
-      `&$desktop_url=${encodeURIComponent(window.location.href)}`;
-
-    window.location.href = branchLink;
-  };
-
   return (
-    <div style={styles.container}>
-      <img src="/images/og-image.png" alt="Historia" style={styles.hero} />
-      <h1 style={styles.title}>You've been invited to Historia!</h1>
-      <p style={styles.subtitle}>
-        Explore America's historical landmarks — and get{' '}
-        <strong>1 month of Historia Pro free</strong> when you sign up with this
-        referral.
-      </p>
-      <p style={styles.codeLine}>
-        Your referral code: <strong>{code}</strong>
-      </p>
-      <button onClick={handleDownload} style={styles.button}>
-        {device === 'ios'
-          ? 'Download on the App Store'
-          : device === 'android'
-          ? 'Get it on Google Play'
-          : 'Get the App'}
-      </button>
-      {device === 'desktop' && (
-        <div style={styles.storeLinks}>
-          <a href={IOS_APP_STORE_URL}>
-            <img src="/images/app-store-badge.svg" alt="App Store" height={44} />
-          </a>
-          <a href={ANDROID_PLAY_URL}>
-            <img src="/images/google-play-badge.png" alt="Google Play" height={44} />
-          </a>
-        </div>
-      )}
+    <div style={{ maxWidth: 480, margin: '0 auto', padding: 40, textAlign: 'center' }}>
+      <h1>You've been invited to Historia!</h1>
+      <p>Use referral code <strong>{code}</strong> when signing up for 20 bonus points.</p>
+      <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 24 }}>
+        <a href={IOS_URL}><img src="/images/app-store-badge.svg" alt="App Store" height={44} /></a>
+        <a href={ANDROID_URL}><img src="/images/google-play-badge.png" alt="Google Play" height={44} /></a>
+      </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: { maxWidth: 480, margin: '0 auto', padding: '40px 24px', textAlign: 'center', fontFamily: 'sans-serif' },
-  hero: { width: '100%', maxWidth: 320, borderRadius: 16, marginBottom: 24 },
-  title: { fontSize: 26, fontWeight: 700, marginBottom: 12 },
-  subtitle: { fontSize: 16, color: '#555', marginBottom: 16, lineHeight: 1.5 },
-  codeLine: { fontSize: 18, marginBottom: 28, color: '#333' },
-  button: { background: '#927f61', color: '#fff', border: 'none', borderRadius: 12, padding: '14px 32px', fontSize: 17, fontWeight: 600, cursor: 'pointer', marginBottom: 24 },
-  storeLinks: { display: 'flex', justifyContent: 'center', gap: 16, marginTop: 8 },
-};
 ```
 
-**Also add the route** in your router config:
-```tsx
-// React Router v6 example
-<Route path="/referral/:code" element={<ReferralPage />} />
-```
+### Known limitation: no deferred deep linking
+If a user taps `https://historia.app/referral/ABC123` *before* installing the app, iOS/Android drop them on the web page — the code is **not** carried through the install. Solutions:
+- **Current:** user enters the code manually on the SignUpScreen "Got a referral code?" input (this path already works).
+- **Fix later if needed:** add a paid deferred-deep-link service (Branch, Appsflyer, Adjust, etc.). None are free for this feature.
 
-**Replace these placeholders in the code above:**
-- `YOUR_APP_ID` → your App Store app ID (from App Store Connect)
-- `com.historia.app` → your actual Android package name
-- `YOURAPP.app.link` → your Branch link domain (from Branch dashboard)
-- `key_live_REPLACE_WITH_YOUR_KEY` → your Branch Live Key
+Landmark links don't have this concern — a user tapping a landmark link without the app installed just sees the web page, which is acceptable.
+
+### Testing
+```bash
+# iOS simulator (custom scheme):
+xcrun simctl openurl booted "historia://landmark/<real-landmark-id>"
+
+# iOS physical device: paste an https://historia.app/landmark/<id> URL in Notes and tap it
+
+# Android:
+adb shell am start -W -a android.intent.action.VIEW \
+  -d "https://historia.app/landmark/<real-landmark-id>" com.historia
+```
 
 ---
 
-### 27. Firestore Security Rules for Referrals
+### Firestore Security Rules for Referrals
 Add to your Firestore rules:
 ```
 match /referrals/{referralId} {
@@ -315,7 +263,7 @@ Add the rules from `docs/NOTIFICATIONS_CLOUD_FUNCTION.md` to your Firestore rule
 
 ### 7. App Store Connect — Create In-App Purchase
 - Log in to App Store Connect → your app → In-App Purchases
-- Create a new **Auto-Renewable Subscription** with product ID: `historia_premium_monthly`
+- Create a new **Auto-Renewable Subscription** with product ID: `historia_pro_monthly`
 - Set price, description, and submit for review
 - Do the same in Google Play Console for Android
 
@@ -557,3 +505,91 @@ For the "exclusive access to limited-edition items / pre-sale drops" reward (Her
 3. Show or hide exclusive product pages / early-access collections based on `pointsBalance >= 500`
 
 The simplest integration: use the Firebase Web SDK on your React website to read the user's `pointsBalance` after they log in with the same Firebase project.
+
+---
+
+## Subscription Welcome Email (`sendSubscriptionWelcome`)
+
+Fires after a user successfully starts a Historia Pro purchase — sends them a welcome email via Resend and adds them to the Shopify email marketing list.
+
+### 1. Create / verify the private subreddit
+- Create a private subreddit for Historia Pro members (e.g. `r/HistoriaPro`)
+- Decide on the access flow (manual approval, invite link, etc.) — the welcome email links users here
+
+### 2. Set the Reddit URL env var on the function
+```bash
+firebase functions:config:set reddit.community_url="https://www.reddit.com/r/HistoriaPro"
+# or, for v2 params, set REDDIT_COMMUNITY_URL in the function's env at deploy time
+```
+If unset, the function falls back to `https://www.reddit.com/r/HistoriaPro`.
+
+### 3. Verify existing env vars are set
+The function reuses the same env vars as `processRewards`:
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL` (default: `Historia Rewards <rewards@historia.app>`)
+- `SHOPIFY_STORE_DOMAIN`
+- `SHOPIFY_ADMIN_API_TOKEN`
+
+### 4. Add `write_customers` scope to the Shopify Admin API token
+The rewards flow only needs `write_discounts`. To add customers to the marketing list, the same token must also have:
+- `write_customers`
+- `read_customers`
+
+Update the custom app permissions in Shopify Admin → Apps → Develop apps → your app → Configuration, then reinstall and copy the new token.
+
+### 5. Deploy the function
+```bash
+cd functions && firebase deploy --only functions:sendSubscriptionWelcome
+```
+
+### 6. Test
+After deploy, start a Pro trial on a test account and verify:
+- Welcome email arrives at the user's email
+- Reddit link in email works
+- Customer appears in Shopify Admin → Customers with `email_marketing_consent: subscribed` and the `historia-pro` tag
+
+---
+
+## Push Notifications (FCM)
+
+End-to-end push for new messages. Uses FCM's free `data` payload for deep-linking — no Branch / OneSignal / external service required.
+
+### 1. Upload an APNs auth key to Firebase (iOS, one-time)
+- Apple Developer Portal → Keys → `+` → name it "Historia APNs" → check **Apple Push Notifications service (APNs)** → Continue → Register → download the `.p8` (you only get one chance).
+- Also note the **Key ID** (10 chars) and your **Team ID** (top-right corner of Apple Developer).
+- Firebase Console → Project Settings → Cloud Messaging tab → Apple app configuration → upload the `.p8`, paste Key ID and Team ID.
+
+### 2. Flip `aps-environment` before shipping to TestFlight / App Store
+`ios/historia/historia.entitlements` currently has:
+```xml
+<key>aps-environment</key>
+<string>development</string>
+```
+For production / TestFlight builds, change `development` → `production`. Xcode's "Release" configuration typically handles this via capabilities, but double-check before archiving.
+
+### 3. Run pod install after the first pull
+The AppDelegate adds `import UserNotifications` and conforms to `UNUserNotificationCenterDelegate` — no new pods, but run it once to be safe:
+```bash
+cd ios && bundle exec pod install && cd ..
+```
+
+### 4. Confirm Android `google-services.json` is current
+`android/app/google-services.json` must include the **Cloud Messaging** sender ID for the project. If the file was added before FCM was enabled, re-download from Firebase Console → Project Settings → Your apps → Android app.
+
+### 5. Deploy the Firestore trigger
+```bash
+cd functions && firebase deploy --only functions:onMessageCreate
+```
+This deploys the `onMessageCreate` trigger which fires on every new document in `conversations/{conversationId}/messages/{messageId}` and sends push + writes the in-app notification doc.
+
+### 6. Test end-to-end
+Use two physical devices (iOS simulator can't receive push).
+
+- **Token registration:** log in on device B → open Firestore Console → `users/{uid}` → confirm `fcmToken` field is populated.
+- **Background/killed push:** kill the app on device B → from device A, send a DM to B → device B should receive a system push. Tap it → app opens directly into the ChatScreen with the right conversation.
+- **Foreground toast:** put device B's app in foreground → from device A, send another DM → device B should show a bottom toast with the message preview. Tap the toast to jump into the chat.
+- **In-app bell:** open Profile on device B → the bell icon shows a red unread badge → tap to open NotificationsScreen → entry reads "A: <preview>" → tap opens the chat AND marks it read.
+- **Stale token cleanup:** in Firestore Console, manually set `users/{B}.fcmToken` to `"bogus"` → from device A, send a message → in the function logs you should see a `messaging/registration-token-not-registered` error and the field should be deleted from the user doc.
+
+### 7. (Optional) Test with the Firebase Console before wiring the trigger
+Firebase Console → Cloud Messaging → "Send your first message" → paste a `fcmToken` from a user doc → send a test. If this works but real messages don't, the trigger isn't deployed (step 5).

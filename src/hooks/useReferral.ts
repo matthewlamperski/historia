@@ -4,17 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { referralService } from '../services/referralService';
 import { useAuthStore } from '../store/authStore';
 import { useToast } from './useToast';
-
-// Lazy-load Branch to avoid initializing its native module at app start,
-// which causes Reanimated listener errors on New Architecture (Bridgeless).
-// Branch also requires native setup before it can be used — see MANUAL_SETUP_CHECKLIST.md.
-function getBranch(): any | null {
-  try {
-    return require('react-native-branch').default;
-  } catch {
-    return null;
-  }
-}
+import { usePointsConfig } from '../context/PointsConfigContext';
+import { useSubscription } from './useSubscription';
 
 const PENDING_REFERRAL_KEY = 'pendingReferralCode';
 
@@ -30,12 +21,13 @@ export interface UseReferralReturn {
 export const useReferral = (): UseReferralReturn => {
   const { user } = useAuthStore();
   const { showToast } = useToast();
+  const { config: pointsConfig } = usePointsConfig();
+  const { isPremium } = useSubscription();
   const [referralCount, setReferralCount] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
 
   const referralCode = user?.referralCode ?? null;
 
-  // Load referral count
   useEffect(() => {
     if (!user?.id) return;
     referralService
@@ -44,47 +36,20 @@ export const useReferral = (): UseReferralReturn => {
       .catch(() => {});
   }, [user?.id]);
 
-  // Build a Branch short link and open the native share sheet.
-  // If Branch isn't configured yet, falls back to a plain web URL gracefully.
+  // Opens the native share sheet with a plain Universal Link. The link is
+  // intercepted by the iOS / Android App Links config and routed back into the
+  // app if the recipient has it installed. No external SDK, no MAU caps.
   const shareReferralLink = useCallback(async () => {
     if (!referralCode || !user) return;
     setIsSharing(true);
 
-    let shareUrl = `https://historia.app/referral/${referralCode}`;
+    const shareUrl = `https://historia.app/referral/${referralCode}`;
+    const bonus = pointsConfig?.earning.referralPoints;
+    const bonusFragment = bonus ? ` and earn ${bonus} bonus points` : '';
 
     try {
-      const branch = getBranch();
-      if (branch) {
-        try {
-          const buo = await branch.createBranchUniversalObject(
-            `referral/${referralCode}`,
-            {
-              title: `${user.name} invited you to Historia`,
-              contentDescription:
-                'Explore historical landmarks together. Use my referral and get 20 bonus points on Historia!',
-              contentImageUrl: 'https://historia.app/images/og-image.png',
-            }
-          );
-
-          const result = await buo.generateShortUrl(
-            { feature: 'referral', campaign: 'user_referral', channel: 'share_sheet' },
-            {
-              referral_code: referralCode,
-              referrer_name: user.name,
-              $og_title: `${user.name} invited you to Historia`,
-              $og_description: 'Explore historical landmarks and get 20 bonus points on Historia!',
-              $desktop_url: shareUrl,
-            }
-          );
-          shareUrl = result.url;
-        } catch (branchErr) {
-          // Branch not initialized / not configured — proceed with plain URL
-          console.warn('[Referral] Branch unavailable, using plain URL:', branchErr);
-        }
-      }
-
       await Share.share({
-        message: `Join me on Historia and earn 20 bonus points! Use my referral link: ${shareUrl}`,
+        message: `Join me on Historia${bonusFragment}! Use my referral link: ${shareUrl}`,
         url: shareUrl,
         title: 'Join me on Historia',
       });
@@ -94,14 +59,12 @@ export const useReferral = (): UseReferralReturn => {
     } finally {
       setIsSharing(false);
     }
-  }, [referralCode, user, showToast]);
+  }, [referralCode, user, showToast, pointsConfig]);
 
-  // Store a pending referral code (from Branch deep link or manual entry)
   const setPendingReferralCode = useCallback(async (code: string) => {
     await AsyncStorage.setItem(PENDING_REFERRAL_KEY, code.trim().toUpperCase());
   }, []);
 
-  // Apply any stored pending referral after a new sign-up
   const applyPendingReferral = useCallback(
     async (newUserId: string): Promise<boolean> => {
       try {
@@ -111,11 +74,19 @@ export const useReferral = (): UseReferralReturn => {
         const applied = await referralService.applyReferral(code, newUserId);
 
         if (applied) {
-          showToast('Referral applied — you earned 20 bonus points!', 'success');
+          const bonus = pointsConfig?.earning.referralPoints;
+          let message: string;
+          if (bonus && !isPremium) {
+            message = `Referral applied — +${bonus} pts. Upgrade to Pro to redeem.`;
+          } else if (bonus) {
+            message = `Referral applied — you earned ${bonus} bonus points!`;
+          } else {
+            message = 'Referral applied — bonus points awarded!';
+          }
+          showToast(message, 'success');
           await AsyncStorage.removeItem(PENDING_REFERRAL_KEY);
           return true;
         } else {
-          // Silently remove invalid/already-used codes
           await AsyncStorage.removeItem(PENDING_REFERRAL_KEY);
           return false;
         }
@@ -124,7 +95,7 @@ export const useReferral = (): UseReferralReturn => {
         return false;
       }
     },
-    [showToast]
+    [showToast, pointsConfig, isPremium],
   );
 
   return {
@@ -135,33 +106,4 @@ export const useReferral = (): UseReferralReturn => {
     applyPendingReferral,
     setPendingReferralCode,
   };
-};
-
-// Standalone helper: set up Branch deep link listener at app start.
-// Call this once inside useAuth so it captures links before sign-up.
-export const useBranchListener = () => {
-  useEffect(() => {
-    const branch = getBranch();
-    if (!branch) return; // Branch not configured yet — skip
-
-    const unsubscribe = branch.subscribe({
-      onOpenComplete: ({ error, params }: { error: any; params: any }) => {
-        if (error || !params) return;
-
-        const referralCode: string | undefined = params.referral_code as string | undefined;
-        const isFirstSession: boolean = params['+is_first_session'] === true;
-
-        // Only store on first session (fresh install via Branch link)
-        if (referralCode && isFirstSession) {
-          AsyncStorage.setItem(PENDING_REFERRAL_KEY, referralCode.toUpperCase()).catch(
-            () => {}
-          );
-        }
-      },
-    });
-
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
-  }, []);
 };

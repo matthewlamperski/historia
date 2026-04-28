@@ -3,6 +3,7 @@ import storage from '@react-native-firebase/storage';
 import { COLLECTIONS } from './firebaseConfig';
 import { Post, Comment, CreatePostData, CreateCommentData, User } from '../types';
 import { pointsService } from './pointsService';
+import { getEarning } from './pointsConfigCache';
 
 class PostsService {
   // Get posts with pagination (for infinite scrolling)
@@ -143,6 +144,9 @@ class PostsService {
     if (postData.images && postData.images.length > 10) {
       throw new Error('Maximum 10 photos allowed per post');
     }
+    if (postData.videos && postData.videos.length > 3) {
+      throw new Error('Maximum 3 videos allowed per post');
+    }
 
     try {
       const now = firestore.Timestamp.now();
@@ -187,13 +191,23 @@ class PostsService {
         updatedAt: now.toDate(),
       } as Post;
 
-      // Award points for post creation (non-blocking, respects daily limit)
-      pointsService.canEarnPostPoints(userId).then(canEarn => {
-        if (canEarn) {
-          const pts = 5 + (postData.images?.length ?? 0) + (postData.videos?.length ?? 0);
-          return pointsService.awardPoints(userId, pts, 'post_creation');
-        }
-      }).catch(console.error);
+      // Award points for post creation (non-blocking, respects daily limit).
+      // Earning rules come from the dynamic points config; skip if unavailable.
+      const earning = getEarning();
+      if (earning) {
+        pointsService.canEarnPostPoints(userId, earning.dailyPostCap).then(canEarn => {
+          if (canEarn) {
+            const imageCount = postData.images?.length ?? 0;
+            const videoCount = postData.videos?.length ?? 0;
+            const pts =
+              earning.postBasePoints +
+              (imageCount + videoCount) * earning.postPerMediaPoints;
+            return pointsService.awardPoints(userId, pts, 'post_creation');
+          }
+        }).catch(console.error);
+      } else {
+        console.warn('[postsService] earning rules unavailable; post created without point award');
+      }
 
       return returnPost;
     } catch (error) {

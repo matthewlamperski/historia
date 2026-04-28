@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ⚠️  DEV-MODE wildcard. Preserved verbatim from the currently
+    // deployed rules — every other rule below is effectively a no-op
+    // until this is removed. Tighten before going to production.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+
+    // Users can create reports
+    match /reports/{reportId} {
+      allow create: if request.auth != null;
+      allow read, update: if request.auth.token.admin == true;
+    }
+
+    // Users manage their own blocks
+    match /blocks/{blockId} {
+      allow read, write: if request.auth != null &&
+        blockId.matches(request.auth.uid + '_.*');
+    }
+
+    // Ban status readable by user, writable by admin
+    match /userBans/{oderId} {
+      allow read: if request.auth.token.admin == true ||
+        request.auth.uid == resource.data.userId;
+      allow write: if request.auth.token.admin == true;
+    }
+
+    // Only admins can manage moderation actions
+    match /moderationActions/{actionId} {
+      allow read, write: if request.auth.token.admin == true;
+    }
+
+    // Admin allow-list — presence-only. If admins/{uid} exists, that
+    // user is an admin. Body shape: { role: 'admin', addedAt, addedBy }.
+    match /admins/{uid} {
+      allow read, write: if request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Reward issuance tiers — read for any signed-in user (so the
+    // mobile/admin app can show drift status); write only by admins.
+    match /rewardTiers/{tierId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Points config (config/points + config/welcomeMessage) — readable
+    // by any signed-in user, writable only by admins. Mobile app reads
+    // config/points on every cold start; the onUserCreate Cloud Function
+    // reads config/welcomeMessage via the admin SDK (bypasses rules).
+    match /config/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Blog posts — public read so the marketing site can fetch them
+    // anonymously; admin-only write.
+    match /blogPosts/{postId} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // For production, use more restrictive rules like:
+    // match /posts/{postId} {
+    //   allow read: if true;
+    //   allow write: if request.auth != null && request.auth.uid == resource.data.userId;
+    // }
+  }
+}

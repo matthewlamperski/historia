@@ -3,10 +3,11 @@ import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
 import FirebaseCore
+import UserNotifications
 
 
 @main
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   var window: UIWindow?
 
   var reactNativeDelegate: ReactNativeDelegate?
@@ -18,6 +19,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   ) -> Bool {
     // Configure Firebase before anything else
     FirebaseApp.configure()
+
+    // Push notifications: claim the notification center delegate so iOS surfaces
+    // foreground alerts / taps to us. Registration for remote notifications happens
+    // lazily when the JS side (useFCMToken) calls messaging().requestPermission()
+    // — RNFirebase's default swizzling handles the rest.
+    UNUserNotificationCenter.current().delegate = self
 
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)

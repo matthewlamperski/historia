@@ -81,6 +81,7 @@ class NotificationService {
                 senderUsername: data.senderUsername,
                 type: data.type as NotificationType,
                 referenceId: data.referenceId,
+                previewText: data.previewText,
                 isRead: data.isRead,
                 createdAt: data.createdAt?.toDate() ?? new Date(),
               };

@@ -7,7 +7,7 @@ export type RootStackParamList = {
   Profile: { userId: string };
   ProfileView: { userId: string };
   PostDetail: { post: Post };
-  ChatScreen: { conversationId: string; otherUserId?: string; otherUserName?: string; otherUserAvatar?: string; otherUserUsername?: string };
+  ChatScreen: { conversationId: string; otherUserId?: string; otherUserName?: string; otherUserAvatar?: string; otherUserUsername?: string; pendingLandmarkId?: string };
   Settings: undefined;
   BlockedUsers: undefined;
   MutedUsers: undefined;
@@ -15,8 +15,10 @@ export type RootStackParamList = {
   Bookmarks: undefined;
   EditProfile: undefined;
   OfflineMaps: undefined;
-  NewConversation: undefined;
+  NewConversation: { shareLandmarkId?: string } | undefined;
   NewGroup: undefined;
+  LandmarkDetail: { landmarkId: string };
+  AskBede: { landmarkId: string; landmarkName: string };
   GroupInfo: { conversationId: string };
   ChooseHandle: undefined;
   Notifications: undefined;
@@ -26,6 +28,7 @@ export type RootStackParamList = {
   CompanionsList: { userId: string };
   SetHometown: undefined;
   NearbyUsers: undefined;
+  Auth: undefined;
   // Add more screens as needed
 };
 
@@ -108,7 +111,8 @@ export type PremiumFeature =
   | 'GRATITUDE_REFLECTIONS'
   | 'UNLIMITED_BOOKMARKS'
   | 'ACHIEVEMENT_BADGES'
-  | 'POINT_REDEMPTIONS';
+  | 'POINT_REDEMPTIONS'
+  | 'ASK_BEDE';
 
 export interface SubscriptionRecord {
   userId: string;
@@ -123,6 +127,27 @@ export interface SubscriptionRecord {
   transactionId: string | null;
   platform: 'ios' | 'android' | null;
   referralBonusExpiry?: string | null; // ISO date — user gets premium until this date via referral
+
+  // ─── Lifecycle fields populated by webhook handlers / receipt validation ───
+  /** Apple's stable subscription ID across all renewals. Required to match incoming webhook events to a user. */
+  originalTransactionId?: string | null;
+  /** Google Play purchase token. Required to query Google Play Subscriptions:get for status. */
+  purchaseToken?: string | null;
+  /** Latest signed receipt blob (Apple) — kept for re-verification on demand. */
+  latestReceipt?: string | null;
+  /** When the billing-retry grace period ends. During this window we may keep the user as premium per Apple/Google guidance. */
+  gracePeriodExpiresDate?: string | null;
+  /** Apple/Google flag for whether the subscription will auto-renew. False after user cancels. */
+  autoRenewStatus?: boolean | null;
+  /** When the user cancelled. May still be active until subscriptionEndDate. */
+  cancellationDate?: string | null;
+  /** Apple/Google reason code for cancellation/revocation. */
+  cancellationReason?: string | null;
+  /** 'production' | 'sandbox' — distinguishes test purchases from real ones. */
+  environment?: 'production' | 'sandbox' | null;
+  /** Set by sendSubscriptionWelcome the first time the welcome email is sent — ensures we never email twice. */
+  welcomeEmailSentAt?: string | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -174,8 +199,32 @@ export interface Referral {
   completedAt: Date | null;
 }
 
+// Ask Bede AI assistant
+export interface BedeSource {
+  title: string;
+  url: string;
+}
+
+export interface BedeMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: Date;
+  sources?: BedeSource[];
+}
+
+export interface BedeUsage {
+  date: string; // YYYY-MM-DD
+  count: number;
+  dailyLimit: number;
+  remaining: number;
+}
+
 // Notification types
-export type NotificationType = 'companion_request' | 'companion_accepted';
+export type NotificationType =
+  | 'companion_request'
+  | 'companion_accepted'
+  | 'new_message';
 
 export interface AppNotification {
   id: string;
@@ -185,7 +234,8 @@ export interface AppNotification {
   senderAvatar?: string;
   senderUsername?: string;
   type: NotificationType;
-  referenceId: string; // companion request doc ID
+  referenceId: string; // companion request doc ID, or conversationId for new_message
+  previewText?: string; // short preview (used for message notifications)
   isRead: boolean;
   createdAt: Date;
 }
@@ -338,6 +388,13 @@ export interface Message {
     userId: string;
     userName: string;
   };
+  landmarkReference?: {
+    landmarkId: string;
+    name: string;
+    category: Landmark['category'];
+    image?: string;
+    address?: string;
+  };
   likes: string[];
   isEmojiOnly: boolean;
   readBy: string[];
@@ -357,6 +414,13 @@ export interface CreateMessageData {
     images: string[];
     userId: string;
     userName: string;
+  };
+  landmarkReference?: {
+    landmarkId: string;
+    name: string;
+    category: Landmark['category'];
+    image?: string;
+    address?: string;
   };
 }
 

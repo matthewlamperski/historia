@@ -219,13 +219,18 @@ class ModerationService {
     // Delete the post
     batch.delete(postRef);
 
-    // Decrement user's post count
-    const userRef = firestore().collection(COLLECTIONS.USERS).doc(userId);
-    batch.update(userRef, {
-      postCount: firestore.FieldValue.increment(-1),
-    });
-
     await batch.commit();
+
+    // Decrement the user's post count with a floor at 0. We can't use
+    // FieldValue.increment(-1) here because it has no floor — older accounts
+    // whose count drifted (or never had the field) end up negative. A
+    // transactional read-modify-write is correct.
+    const userRef = firestore().collection(COLLECTIONS.USERS).doc(userId);
+    await firestore().runTransaction(async tx => {
+      const userDoc = await tx.get(userRef);
+      const current = (userDoc.data()?.postCount as number | undefined) ?? 0;
+      tx.update(userRef, { postCount: Math.max(0, current - 1) });
+    });
   }
 
   // ==================== COMMENT DELETION ====================
