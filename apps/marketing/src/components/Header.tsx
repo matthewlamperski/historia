@@ -7,6 +7,7 @@ const NAV = [
   { to: '/download', label: 'Download' },
   { to: '/blog', label: 'Blog' },
   { to: '/about', label: 'About' },
+  { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
 ];
 

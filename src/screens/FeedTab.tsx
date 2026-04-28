@@ -8,10 +8,10 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Button, Post, CreatePostModal, SignupCTA } from '../components/ui';
+import { Text, Button, Post, CreatePostModal } from '../components/ui';
 import { LandmarkModal } from '../components/ui/LandmarkModal';
 import { theme } from '../constants/theme';
-import { usePosts, useCompanions, useModeration } from '../hooks';
+import { usePosts, useCompanions, useModeration, useRequireAuth } from '../hooks';
 import { Post as PostType, CreatePostData, Landmark } from '../types';
 import Icon from 'react-native-vector-icons/FontAwesome6';
 import { useNavigation } from '@react-navigation/native';
@@ -32,6 +32,7 @@ const FeedTab = () => {
 
   const { user } = useAuthStore();
   const userId = user?.id ?? '';
+  const requireAuth = useRequireAuth();
   const { companions } = useCompanions(userId);
   const { mutedUserIds } = useModeration();
 
@@ -74,19 +75,21 @@ const FeedTab = () => {
   }, [showFollowingOnly, userId, loadCompanionPosts, refreshPosts]);
 
   const handleComment = useCallback((postId: string) => {
+    if (!requireAuth()) return;
     const post = posts.find(p => p.id === postId);
     if (post) {
       navigation.navigate('PostDetail', { post });
     }
-  }, [navigation, posts]);
+  }, [navigation, posts, requireAuth]);
 
   const handleShare = useCallback((_postId: string) => {
     // In a real app, this would open a share sheet
   }, []);
 
   const handleUserPress = useCallback((uid: string) => {
+    if (!requireAuth()) return;
     navigation.navigate('ProfileView', { userId: uid });
-  }, [navigation]);
+  }, [navigation, requireAuth]);
 
   const handleCreatePost = useCallback(async (postData: CreatePostData) => {
     await createPost(postData);
@@ -106,7 +109,10 @@ const FeedTab = () => {
   const renderPost = useCallback(({ item }: { item: PostType }) => (
     <TouchableOpacity
       activeOpacity={0.95}
-      onPress={() => navigation.navigate('PostDetail', { post: item })}
+      onPress={() => {
+        if (!requireAuth()) return;
+        navigation.navigate('PostDetail', { post: item });
+      }}
     >
       <Post
         post={item}
@@ -118,7 +124,7 @@ const FeedTab = () => {
         onDelete={removePost}
       />
     </TouchableOpacity>
-  ), [handleComment, handleShare, handleUserPress, handleLandmarkPress, navigation, userId]);
+  ), [handleComment, handleShare, handleUserPress, handleLandmarkPress, navigation, userId, requireAuth, removePost]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -126,43 +132,51 @@ const FeedTab = () => {
         Feed
       </Text>
       <View style={styles.headerActions}>
-        <TouchableOpacity
-          style={[styles.filterButton, showCompanionsOnly && styles.filterButtonActive]}
-          onPress={handleToggleCompanionFilter}
-        >
-          <Icon
-            name="user-group"
-            size={14}
-            color={showCompanionsOnly ? theme.colors.white : theme.colors.primary[500]}
-          />
-          <Text
-            variant="caption"
-            color={showCompanionsOnly ? 'white' : 'primary.500'}
-            style={styles.filterText}
-          >
-            Companions
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterButton, showFollowingOnly && styles.filterButtonActive]}
-          onPress={handleToggleFollowingFilter}
-        >
-          <Icon
-            name="rss"
-            size={14}
-            color={showFollowingOnly ? theme.colors.white : theme.colors.primary[500]}
-          />
-          <Text
-            variant="caption"
-            color={showFollowingOnly ? 'white' : 'primary.500'}
-            style={styles.filterText}
-          >
-            Following
-          </Text>
-        </TouchableOpacity>
+        {/* Personalized filters only make sense for signed-in users. */}
+        {user && (
+          <>
+            <TouchableOpacity
+              style={[styles.filterButton, showCompanionsOnly && styles.filterButtonActive]}
+              onPress={handleToggleCompanionFilter}
+            >
+              <Icon
+                name="user-group"
+                size={14}
+                color={showCompanionsOnly ? theme.colors.white : theme.colors.primary[500]}
+              />
+              <Text
+                variant="caption"
+                color={showCompanionsOnly ? 'white' : 'primary.500'}
+                style={styles.filterText}
+              >
+                Companions
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.filterButton, showFollowingOnly && styles.filterButtonActive]}
+              onPress={handleToggleFollowingFilter}
+            >
+              <Icon
+                name="rss"
+                size={14}
+                color={showFollowingOnly ? theme.colors.white : theme.colors.primary[500]}
+              />
+              <Text
+                variant="caption"
+                color={showFollowingOnly ? 'white' : 'primary.500'}
+                style={styles.filterText}
+              >
+                Following
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => setShowCreatePost(true)}
+          onPress={() => {
+            if (!requireAuth()) return;
+            setShowCreatePost(true);
+          }}
         >
           <Icon name="plus" size={18} color={theme.colors.primary[500]} />
         </TouchableOpacity>
@@ -181,7 +195,10 @@ const FeedTab = () => {
       </Text>
       <Button
         variant="primary"
-        onPress={() => setShowCreatePost(true)}
+        onPress={() => {
+          if (!requireAuth()) return;
+          setShowCreatePost(true);
+        }}
         style={styles.emptyButton}
       >
         Create Your First Post
@@ -220,18 +237,6 @@ const FeedTab = () => {
       </Button>
     </View>
   );
-
-  if (!user) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <SignupCTA
-          icon="newspaper"
-          title="Join the conversation"
-          subtitle="See posts from explorers near you, share your own discoveries, and follow fellow history buffs."
-        />
-      </SafeAreaView>
-    );
-  }
 
   if (error && posts.length === 0) {
     return (
