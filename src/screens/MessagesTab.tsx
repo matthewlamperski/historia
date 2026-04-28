@@ -157,8 +157,8 @@ const MessagesTab: React.FC<TabScreenProps<'Messages'>> = ({ navigation }) => {
       <SafeAreaView style={styles.container} edges={['top']}>
         <SignupCTA
           icon="comments"
-          title="Connect with travelers"
-          subtitle="Message companions, plan visits together, and swap stories from the road."
+          title="Connect with explorers"
+          subtitle="Message companions, plan visits together, and share stories from the road."
         />
       </SafeAreaView>
     );

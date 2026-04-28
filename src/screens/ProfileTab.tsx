@@ -79,8 +79,8 @@ const ProfileTab = () => {
       <SafeAreaView style={styles.container}>
         <SignupCTA
           icon="user"
-          title="Track your historia"
-          subtitle="Check in to landmarks, earn levels, save bookmarks, and build your travel journal."
+          title="Create your profile"
+          subtitle="Bookmark historic sites, check in at landmarks, earn points & rewards, save historic sites, and build your travel journal."
         />
       </SafeAreaView>
     );
