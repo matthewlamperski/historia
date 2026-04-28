@@ -21,6 +21,12 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   isInitialized: boolean;
+  /**
+   * True while signUpWithEmail / signInWithGoogle / signInWithApple are
+   * actively creating-or-fetching the user profile. The auth-state listener
+   * uses this to avoid racing those flows with its own writes.
+   */
+  profileCreationInProgress: boolean;
   error: string | null;
 
   // Actions
@@ -28,6 +34,7 @@ interface AuthState {
   setAuthUser: (authUser: AuthUser | null) => void;
   setLoading: (loading: boolean) => void;
   setInitialized: (initialized: boolean) => void;
+  setProfileCreationInProgress: (v: boolean) => void;
   setError: (error: string | null) => void;
   updateUser: (updates: Partial<User>) => void;
 
@@ -59,6 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,
+  profileCreationInProgress: false,
   error: null,
 
   setUser: user =>
@@ -73,6 +81,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setInitialized: isInitialized => set({ isInitialized }),
 
+  setProfileCreationInProgress: v => set({ profileCreationInProgress: v }),
+
   setError: error => set({ error }),
 
   updateUser: updates =>
@@ -82,7 +92,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   // Sign in with email and password
   signInWithEmail: async (email, password) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, profileCreationInProgress: true });
     try {
       const userCredential = await auth().signInWithEmailAndPassword(
         email,
@@ -119,12 +129,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ error: errorMessage, isLoading: false });
       throw new Error(errorMessage);
+    } finally {
+      set({ profileCreationInProgress: false });
     }
   },
 
   // Sign up with email and password
   signUpWithEmail: async (email, password, displayName, handle) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, profileCreationInProgress: true });
     try {
       const userCredential = await auth().createUserWithEmailAndPassword(
         email,
@@ -168,12 +180,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ error: errorMessage, isLoading: false });
       throw new Error(errorMessage);
+    } finally {
+      set({ profileCreationInProgress: false });
     }
   },
 
   // Sign in with Google
   signInWithGoogle: async () => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, profileCreationInProgress: true });
     try {
       // Check if device supports Google Play Services
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
@@ -222,6 +236,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ error: errorMessage, isLoading: false });
       throw new Error(errorMessage);
+    } finally {
+      set({ profileCreationInProgress: false });
     }
   },
 
@@ -231,7 +247,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       throw new Error('Apple Sign In is only available on iOS');
     }
 
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, profileCreationInProgress: true });
     try {
       // Perform Apple Sign In request
       const appleAuthRequestResponse = await appleAuth.performRequest({
@@ -298,6 +314,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       set({ error: errorMessage, isLoading: false });
       throw new Error(errorMessage);
+    } finally {
+      set({ profileCreationInProgress: false });
     }
   },
 

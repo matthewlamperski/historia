@@ -25,15 +25,11 @@ const ProfileTab = () => {
   const { user, authUser } = useAuthStore();
   const currentUserId = user?.id ?? '';
   const [avatarError, setAvatarError] = useState(false);
-  // Display fallback chain: prefer the Firestore name, then the Firebase Auth
-  // displayName, then the email prefix. Avoids ever rendering "Anonymous"
-  // for a real user whose Firestore doc somehow lacks a name field.
-  const displayName =
-    user?.name ||
-    authUser?.displayName ||
-    user?.email?.split('@')[0] ||
-    authUser?.email?.split('@')[0] ||
-    'Explorer';
+  // Prefer the Firestore name; fall back to the Auth displayName for the
+  // brief moment between sign-in and Firestore profile load. Deliberately
+  // do NOT fall back to the email prefix — that masks bugs and leaks email
+  // addresses into the UI.
+  const displayName = user?.name || authUser?.displayName || 'Explorer';
 
   const { posts, removePost } = useUserPosts(currentUserId);
   const { companions } = useCompanions(currentUserId, !!currentUserId);

@@ -57,7 +57,6 @@ export const useAuth = (): UseAuthReturn => {
     signOut,
     resetPassword,
     fetchUserProfile,
-    createUserProfile,
   } = useAuthStore();
 
   const { initialize: initSubscription, teardown: teardownSubscription } = useSubscriptionStore();
@@ -76,6 +75,11 @@ export const useAuth = (): UseAuthReturn => {
   const handleAuthStateChanged = useCallback(
     async (firebaseUser: FirebaseAuthTypes.User | null) => {
       if (firebaseUser) {
+        // If a sign-up/sign-in method is mid-flight, that method owns the
+        // profile read/write. Anything we do here can race with its writes
+        // and corrupt the user's name (the bug fixed in this commit).
+        const inProgress = useAuthStore.getState().profileCreationInProgress;
+
         // User is signed in
         setAuthUser({
           id: firebaseUser.uid,
@@ -91,66 +95,66 @@ export const useAuth = (): UseAuthReturn => {
         const userProfile = await fetchUserProfile(firebaseUser.uid);
 
         if (userProfile) {
-          // Sync name/avatar from Firebase Auth (important for Google/Apple users).
-          // CRITICAL: only sync `photoURL` if it's a remote https URL. A local
-          // file URI in Firebase Auth photoURL was the root cause of the
-          // "avatar resets to a broken local path on every save" bug —
-          // a corrupted Auth value would propagate to Firestore here on every
-          // launch. We now also actively scrub a corrupted Firestore avatar
-          // when we detect it.
-          const authName = firebaseUser.displayName;
-          const authPhoto = firebaseUser.photoURL;
-          const isRemotePhoto =
-            typeof authPhoto === 'string' &&
-            (authPhoto.startsWith('https://') || authPhoto.startsWith('http://'));
-          const isRemoteFirestoreAvatar =
-            typeof userProfile.avatar === 'string' &&
-            (userProfile.avatar.startsWith('https://') ||
-              userProfile.avatar.startsWith('http://'));
-
-          const updates: Partial<User> = {};
-          if (authName && authName !== userProfile.name) {
-            updates.name = authName;
-          } else if (!userProfile.name) {
-            // Repair: Firestore profile somehow has no name. Try Auth's
-            // displayName, then the email prefix so the user never sees
-            // "Anonymous" on their own profile.
-            const fallback =
-              authName ||
-              firebaseUser.email?.split('@')[0] ||
-              'Explorer';
-            updates.name = fallback;
-          }
-          // Only apply Auth's photoURL if it's a real URL.
-          if (isRemotePhoto && authPhoto !== userProfile.avatar) {
-            updates.avatar = authPhoto;
-          }
-          // Self-heal a previously-corrupted avatar field — clear it so the
-          // app falls back to the default avatar instead of a broken
-          // file:// reference. User can re-upload a fresh one.
-          if (
-            !isRemoteFirestoreAvatar &&
-            typeof userProfile.avatar === 'string' &&
-            userProfile.avatar.length > 0
-          ) {
-            updates.avatar = '';
-            // Also clear it from Firebase Auth so it doesn't re-corrupt.
-            firebaseUser
-              .updateProfile({ photoURL: '' })
-              .catch(err =>
-                console.warn('[useAuth] failed to clear Auth photoURL:', err),
-              );
-          }
-
-          if (Object.keys(updates).length > 0) {
-            firestore()
-              .collection(COLLECTIONS.USERS)
-              .doc(firebaseUser.uid)
-              .set(updates, { merge: true })
-              .catch(console.error);
-            setUser({ ...userProfile, ...updates });
-          } else {
+          if (inProgress) {
+            // Auth method is authoritative. Just reflect what's in Firestore
+            // and let the method finish its own writes/state updates.
             setUser(userProfile);
+          } else {
+            // Sync name/avatar from Firebase Auth (important for Google/Apple users).
+            // CRITICAL: only sync `photoURL` if it's a remote https URL. A local
+            // file URI in Firebase Auth photoURL was the root cause of the
+            // "avatar resets to a broken local path on every save" bug —
+            // a corrupted Auth value would propagate to Firestore here on every
+            // launch. We now also actively scrub a corrupted Firestore avatar
+            // when we detect it.
+            const authName = firebaseUser.displayName;
+            const authPhoto = firebaseUser.photoURL;
+            const isRemotePhoto =
+              typeof authPhoto === 'string' &&
+              (authPhoto.startsWith('https://') || authPhoto.startsWith('http://'));
+            const isRemoteFirestoreAvatar =
+              typeof userProfile.avatar === 'string' &&
+              (userProfile.avatar.startsWith('https://') ||
+                userProfile.avatar.startsWith('http://'));
+
+            const updates: Partial<User> = {};
+            // Only adopt Auth's name when it's clearly real and differs from
+            // Firestore. We deliberately do NOT fall back to the email prefix
+            // here — it'd permanently corrupt the doc with a synthetic name.
+            if (authName && authName !== userProfile.name) {
+              updates.name = authName;
+            }
+            // Only apply Auth's photoURL if it's a real URL.
+            if (isRemotePhoto && authPhoto !== userProfile.avatar) {
+              updates.avatar = authPhoto;
+            }
+            // Self-heal a previously-corrupted avatar field — clear it so the
+            // app falls back to the default avatar instead of a broken
+            // file:// reference. User can re-upload a fresh one.
+            if (
+              !isRemoteFirestoreAvatar &&
+              typeof userProfile.avatar === 'string' &&
+              userProfile.avatar.length > 0
+            ) {
+              updates.avatar = '';
+              // Also clear it from Firebase Auth so it doesn't re-corrupt.
+              firebaseUser
+                .updateProfile({ photoURL: '' })
+                .catch(err =>
+                  console.warn('[useAuth] failed to clear Auth photoURL:', err),
+                );
+            }
+
+            if (Object.keys(updates).length > 0) {
+              firestore()
+                .collection(COLLECTIONS.USERS)
+                .doc(firebaseUser.uid)
+                .set(updates, { merge: true })
+                .catch(console.error);
+              setUser({ ...userProfile, ...updates });
+            } else {
+              setUser(userProfile);
+            }
           }
 
           // Backfill referral code for accounts created before this feature was added
@@ -167,24 +171,15 @@ export const useAuth = (): UseAuthReturn => {
               .catch(console.error);
           }
         } else {
-          // Profile missing. Only create a fallback on app restart (isInitialized = false),
-          // meaning the user was already logged in when the app opened.
-          // During an active sign-up/sign-in flow (isInitialized = true), the individual
-          // auth method owns profile creation — don't race with it.
-          if (!useAuthStore.getState().isInitialized) {
-            // App restart with stale auth and missing profile — create fallback
-            const newProfile = await createUserProfile(
-              firebaseUser.uid,
-              firebaseUser.email ?? '',
-              firebaseUser.displayName ?? firebaseUser.email?.split('@')[0] ?? 'User',
-              firebaseUser.photoURL ?? undefined
-            );
-            setUser(newProfile);
-          }
-          // else: active auth method (signUpWithEmail/signInWithGoogle/signInWithApple)
-          // handles profile creation with the correct name — don't race with it
-
-          // Always mark as newly created so referral code can be applied below
+          // Profile missing. We DO NOT auto-create here. The auth method
+          // (signUpWithEmail / signInWithGoogle / signInWithApple) owns
+          // profile creation. Auto-creating here previously raced with the
+          // auth method and corrupted the user's name with the email prefix.
+          //
+          // If profileCreationInProgress is true, the auth method will set
+          // the user shortly. If it's false (e.g., a stale Firebase Auth
+          // session whose Firestore doc was deleted), leave user null so
+          // the app shows the signed-out state and the user re-signs-in.
           newlyCreatedUidRef.current = firebaseUser.uid;
         }
 
@@ -196,20 +191,21 @@ export const useAuth = (): UseAuthReturn => {
           .catch(console.error);
 
         // Migrate anonymous hometown → Firestore for any user who doesn't
-        // yet have one. Anonymous-first onboarding writes a hometown to
-        // AsyncStorage before signup; this step copies it onto the user
-        // profile so the gate stays cleared. We deliberately keep the
-        // AsyncStorage copy around so signing out doesn't re-trigger the
-        // hometown picker.
-        const currentUser = useAuthStore.getState().user;
-        if (currentUser && !currentUser.hometown) {
-          const anonHometown = await getStoredAnonymousHometown();
-          if (anonHometown) {
-            try {
-              await userService.updateHometown(firebaseUser.uid, anonHometown);
-              useAuthStore.getState().updateUser({ hometown: anonHometown });
-            } catch (err) {
-              console.warn('[anon-migration] hometown write failed:', err);
+        // yet have one. Skip while an auth method is in flight — its own
+        // writes are mid-mutation and reading the store now is unreliable.
+        // The migration will run on the next handleAuthStateChanged
+        // invocation (e.g., next launch / token refresh).
+        if (!inProgress) {
+          const currentUser = useAuthStore.getState().user;
+          if (currentUser && !currentUser.hometown) {
+            const anonHometown = await getStoredAnonymousHometown();
+            if (anonHometown) {
+              try {
+                await userService.updateHometown(firebaseUser.uid, anonHometown);
+                useAuthStore.getState().updateUser({ hometown: anonHometown });
+              } catch (err) {
+                console.warn('[anon-migration] hometown write failed:', err);
+              }
             }
           }
         }
@@ -248,7 +244,7 @@ export const useAuth = (): UseAuthReturn => {
       setInitialized(true);
       setLoading(false);
     },
-    [fetchUserProfile, createUserProfile, setUser, updateUser, setAuthUser, setInitialized, setLoading, initSubscription, teardownSubscription]
+    [fetchUserProfile, setUser, updateUser, setAuthUser, setInitialized, setLoading, initSubscription, teardownSubscription]
   );
 
   // Set up auth state listener on mount
