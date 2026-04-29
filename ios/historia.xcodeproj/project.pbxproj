@@ -359,7 +359,7 @@
 				CODE_SIGN_ENTITLEMENTS = historia/historia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = 6Y5F74KQYG;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = historia/Info.plist;
@@ -395,7 +395,7 @@
 				CODE_SIGN_ENTITLEMENTS = historia/historia.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = 6Y5F74KQYG;
 				INFOPLIST_FILE = historia/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Historia;

@@ -1,5 +1,6 @@
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
+import { sendAccountWelcomeEmail } from './email';
 
 const WELCOME_DOC_PATH = 'config/welcomeMessage';
 
@@ -115,8 +116,42 @@ export const onUserCreate = onDocumentCreated(
     const userData = snap.data();
     const db = admin.firestore();
 
+    // ─── Step 1: send the transactional welcome email (Resend) ────────────
+    // Independent of the in-app founder message below — even if the in-app
+    // welcome is disabled or misconfigured, every new user should still get
+    // the brand welcome email. Idempotency lives on its own flag.
+    const userEmail = (userData?.email ?? '').trim();
+    const alreadyEmailed = Boolean(userData?.welcomeEmailSentAt);
+    if (userEmail && !alreadyEmailed) {
+      const fullName: string =
+        (userData?.name ?? userData?.displayName ?? '').trim();
+      const firstName = fullName ? fullName.split(/\s+/)[0] : undefined;
+      try {
+        await sendAccountWelcomeEmail({ email: userEmail, firstName });
+        await db
+          .collection('users')
+          .doc(userId)
+          .update({
+            welcomeEmailSentAt: admin.firestore.Timestamp.now(),
+          });
+        console.info(`onUserCreate: account welcome email sent to ${userEmail}`);
+      } catch (err) {
+        // Non-fatal — the in-app message still ships and we'll retry on
+        // the next account-doc write that triggers this function (rare).
+        console.error(
+          `onUserCreate: failed to send welcome email to ${userEmail}:`,
+          err,
+        );
+      }
+    } else if (!userEmail) {
+      console.warn(
+        `onUserCreate: user ${userId} has no email on profile — skipping welcome email`,
+      );
+    }
+
+    // ─── Step 2: send the in-app founder welcome message ──────────────────
     if (userData?.welcomeMessageSentAt) {
-      console.info(`onUserCreate: user ${userId} already received welcome — skipping`);
+      console.info(`onUserCreate: user ${userId} already received in-app welcome — skipping`);
       return;
     }
 
