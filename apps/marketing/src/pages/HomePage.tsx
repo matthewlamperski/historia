@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import StoreButtons from '../components/StoreButtons';
 import { SITE } from '../config/site';
@@ -19,23 +20,24 @@ export default function HomePage() {
           <div>
             <span className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary-700 shadow-soft">
               <span className="h-1.5 w-1.5 rounded-full bg-success-500" />
-              {SITE.pricing.trialDays}-day free trial · then {SITE.pricing.pro}
+              Historia Pro {SITE.pricing.trialDays}-day free trial · then {SITE.pricing.pro}
             </span>
             <h1 className="mt-6 font-serif text-5xl font-bold leading-[1.05] tracking-tight text-primary-900 md:text-6xl">
-              Turn every adventure into <em className="text-primary-600">real</em>{' '}
-              rewards.
+              Turn adventure into <em className="text-primary-600">rewards</em> by
+              exploring American history together.
             </h1>
             <p className="mt-6 max-w-xl text-lg text-gray-700 md:text-xl">
-              Historia is a location-based exploration app celebrating American
-              history. Discover landmarks on the road, earn points on verified
-              visits, and trade them for Made-in-USA gear at shophistoria.com.
+              Historia is a location-based exploration &amp; connection app
+              celebrating American history. Discover historic sites, museums,
+              and manufacturers, meet new people, and earn points &amp; rewards
+              along the way.
             </p>
             <div className="mt-8">
               <StoreButtons size="lg" />
             </div>
             <p className="mt-4 text-sm text-gray-600">
-              Free to start. No ads. No algorithm. Real interactions, rooted in
-              gratitude.
+              Free to start. No algorithm. No &lsquo;likes.&rsquo; Real
+              interactions, rooted in gratitude.
             </p>
           </div>
 
@@ -81,11 +83,10 @@ export default function HomePage() {
             Why Historia
           </p>
           <h2 className="mt-3 font-serif text-4xl font-bold text-primary-900 md:text-5xl">
-            Built for the road, not the feed.
+            Built for exploration, not for scrolling.
           </h2>
           <p className="mt-4 text-lg text-gray-700">
-            We replaced the algorithm with a map. Replaced likes with miles.
-            Replaced doomscrolling with the next exit.
+            We engineer for maximum real world time. Not maximum screen time.
           </p>
         </div>
 
@@ -97,7 +98,22 @@ export default function HomePage() {
           />
           <Feature
             title="Earn on every visit"
-            text="Verified check-ins, posts with photos, and friends you refer all earn points. Climb 9 named levels and unlock real-world perks."
+            text={
+              <>
+                Verified check-ins, posts &amp; photos, and friends you refer all
+                earn points. Climb all 9 levels and unlock real-world perks like
+                discounts and gift cards at{' '}
+                <a
+                  href={SITE.shopUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary-700 underline underline-offset-2 hover:text-primary-900"
+                >
+                  shophistoria.com
+                </a>
+                .
+              </>
+            }
             badge="Reward"
           />
           <Feature
@@ -156,19 +172,22 @@ export default function HomePage() {
             Gratitude Media
           </p>
           <h2 className="mt-3 font-serif text-3xl font-bold text-primary-900 md:text-4xl">
-            We don't sell attention. We celebrate it.
+            A Feed Built on Gratitude, Not Attention.
           </h2>
           <div className="mt-6 space-y-5 text-lg text-gray-700">
             <p>
-              Historia isn't another social network. There's no infinite feed.
-              No likes. No follower counts. No ads. Posts are tied to real
-              places you've visited, and the only ranking is{' '}
-              <em>chronological</em>.
+              Historia isn&rsquo;t another social network. There&rsquo;s no
+              infinite feed or algorithm. No &lsquo;likes.&rsquo; No follower
+              counts. We call it &lsquo;Gratitude Media:&rsquo; a refreshing
+              space to amplify thankfulness through learned insights, fostering
+              genuine interactions with thoughtful comments and direct messages
+              to plan meetups and real world adventures together.
             </p>
             <p>
-              We call it <strong>Gratitude Media</strong>: technology that
-              points you back to the world. The reward for using it is putting
-              it down—and walking out into history.
+              Post moments from your visits, reflect on learned lessons with a
+              personal gratitude journal for each site, and inspire others with
+              uplifting content and authentic stories that build a more grateful
+              world.
             </p>
           </div>
           <div className="mt-8">
@@ -179,17 +198,57 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* FIND COMPANIONS */}
+      <section className="container-narrow pb-12">
+        <div className="rounded-3xl border border-primary-100 bg-primary-50/60 p-10 shadow-soft md:p-16">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary-600">
+            Find Companions
+          </p>
+          <h2 className="mt-3 font-serif text-3xl font-bold text-primary-900 md:text-4xl">
+            Build lasting connections and find true &lsquo;companions&rsquo;
+            through shared adventure.
+          </h2>
+          <div className="mt-6 space-y-5 text-lg text-gray-700">
+            <p>
+              It&rsquo;s harder than ever to meet people and build genuine
+              friendships. Historia changes that. You share the same
+              inspirational values of self-improvement, gratitude, and lifelong
+              learning. That means you&rsquo;re not just &lsquo;friends,&rsquo;
+              you&rsquo;re &lsquo;companions&rsquo; now.
+            </p>
+            <p>
+              Invite your family, friends, and &lsquo;companions&rsquo; to plan
+              itineraries, meet up, and celebrate discoveries together out in
+              the real world, not virtual. Great adventure and connections start
+              here.
+            </p>
+          </div>
+          <div className="mt-8">
+            <StoreButtons size="lg" />
+          </div>
+        </div>
+      </section>
+
       {/* CTA */}
-      <section className="container-wide pb-24">
+      <section className="container-wide pb-16">
         <div className="overflow-hidden rounded-3xl bg-primary-100 p-10 md:p-16">
           <div className="grid items-center gap-10 md:grid-cols-[1fr_auto]">
             <div>
               <h2 className="font-serif text-4xl font-bold text-primary-900 md:text-5xl">
-                Drive somewhere worth telling someone about.
+                Start your Historia adventure today.
               </h2>
-              <p className="mt-4 max-w-2xl text-lg text-gray-700">
-                Free for 14 days. {SITE.pricing.pro} after. Cancel anytime in
-                your phone settings.
+              <p className="mt-3 font-serif text-xl italic text-primary-700 md:text-2xl">
+                180-day money-back guarantee.
+              </p>
+              <p className="mt-5 max-w-2xl text-lg text-gray-700">
+                Basic: Free forever. Historia Pro: Free for{' '}
+                {SITE.pricing.trialDays} days, then {SITE.pricing.pro}. Cancel
+                anytime in your phone settings.
+              </p>
+              <p className="mt-4 max-w-2xl text-base text-gray-700">
+                If after 180 days you don&rsquo;t feel more connected, more
+                grateful, and more inspired by America&rsquo;s history, you&rsquo;ll
+                get your money back no questions asked.
               </p>
             </div>
             <StoreButtons size="lg" />
@@ -206,7 +265,7 @@ function Feature({
   badge,
 }: {
   title: string;
-  text: string;
+  text: ReactNode;
   badge: string;
 }) {
   return (

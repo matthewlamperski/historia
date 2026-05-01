@@ -92,3 +92,4 @@ scripts/find-landmark-coords.js
 backups/
 
 functions/.env.example
+.claude

@@ -6,14 +6,15 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="mt-24 border-t border-primary-100 bg-primary-50/60">
+    <footer className="mt-8 border-t border-primary-100 bg-primary-50/60">
       <div className="container-wide py-12">
         <div className="grid grid-cols-1 gap-10 md:grid-cols-4">
           <div className="md:col-span-2">
             <Logo size={28} />
             <p className="mt-4 max-w-sm text-sm text-gray-700">
-              {SITE.tagline} Discover historical landmarks across America, earn
-              real rewards on every visit, and trade screen time for the road.
+              Turn adventures into real rewards. Discover historical landmarks
+              across America, earn points on every visit, and trade screen time
+              for real world time.
             </p>
           </div>
 
@@ -85,7 +86,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-primary-100 pt-6 text-xs text-gray-600 md:flex-row md:items-center">
-          <p>© {year} Historia. Made for the road.</p>
+          <p>© {year} Historia LLC. Honor History Together.</p>
           <p className="font-serif italic text-primary-700">
             Real World &gt; Virtual World.
           </p>
