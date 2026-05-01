@@ -84,3 +84,11 @@ apps/*/.vite/
 
 # Firebase Admin SDK service account keys (NEVER commit)
 historia-application-firebase-adminsdk-*.json
+
+# Local scratch script with hardcoded API keys (NEVER commit)
+scripts/find-landmark-coords.js
+
+# Local backups of Google Places API responses (large; do not commit)
+backups/
+
+functions/.env.example
